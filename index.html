@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.2.2)</title>
+    <title>板書・意見整理 AI (v1.2.3)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -51,7 +51,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.2.2";
+        const APP_VERSION = "v1.2.3";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -109,6 +109,11 @@
             const peerRef = useRef(null);
             const connRef = useRef(null);
 
+            const showToast = (msg) => {
+                setToastMessage(msg);
+                setTimeout(() => setToastMessage(null), 3000);
+            };
+
             // PeerJSによるリアルタイムP2P同期設定
             useEffect(() => {
                 try {
@@ -118,21 +123,25 @@
                     peer.on('open', (id) => {
                         console.log('Peer connected with ID:', id);
                         if (appRole === 'participant') {
-                            const conn = peer.connect(roomHostId);
-                            connRef.current = conn;
-                            conn.on('open', () => setPeerConnected(true));
-                            conn.on('close', () => setPeerConnected(false));
+                            connectToHost(peer);
                         }
+                    });
+
+                    peer.on('error', (err) => {
+                        console.warn('Peer error:', err);
                     });
 
                     if (appRole === 'board') {
                         peer.on('connection', (conn) => {
+                            console.log('Host received new connection from:', conn.peer);
                             conn.on('data', (data) => {
-                                if (data && data.type === 'NEW_CARD') {
+                                console.log('Host received data:', data);
+                                if (!data) return;
+                                if (data.type === 'NEW_CARD') {
                                     setCards(prev => [data.card, ...prev]);
                                     showToast(`📩 ${data.card.author || '受講者'}から意見が届きました！`);
-                                } else if (data && data.type === 'DELETE_CARD') {
-                                    // 参加者による送信取り消しを反映
+                                } else if (data.type === 'DELETE_CARD') {
+                                    // 参加者による送信取り消しをボードに即時反映
                                     setCards(prev => prev.filter(c => c.id !== data.cardId));
                                     showToast(`🗑️ ${data.author || '受講者'}が意見の送信を取り消しました`);
                                 }
@@ -147,6 +156,69 @@
                     if (peerRef.current) peerRef.current.destroy();
                 };
             }, [appRole]);
+
+            // ホスト接続関数
+            const connectToHost = (peerInstance) => {
+                const p = peerInstance || peerRef.current;
+                if (!p || p.destroyed) return;
+                try {
+                    const conn = p.connect(roomHostId, { reliable: true });
+                    connRef.current = conn;
+                    conn.on('open', () => {
+                        console.log('Connected to host:', roomHostId);
+                        setPeerConnected(true);
+                    });
+                    conn.on('close', () => {
+                        console.log('Connection to host closed');
+                        setPeerConnected(false);
+                    });
+                    conn.on('error', (err) => {
+                        console.warn('Connection error:', err);
+                        setPeerConnected(false);
+                    });
+                } catch (err) {
+                    console.error('Failed to connect to host:', err);
+                }
+            };
+
+            // P2P確実送信ヘルパー（切断時は自動再接続）
+            const sendP2pMessage = (payload, onComplete) => {
+                if (appRole !== 'participant') {
+                    if (onComplete) onComplete();
+                    return;
+                }
+
+                if (connRef.current && connRef.current.open) {
+                    try {
+                        connRef.current.send(payload);
+                        console.log('Payload sent via active conn:', payload);
+                        if (onComplete) onComplete();
+                        return;
+                    } catch (e) {
+                        console.warn('Send error on active conn, retrying...', e);
+                    }
+                }
+
+                // コネクション未接続または切断時の再接続送信
+                if (peerRef.current && !peerRef.current.destroyed) {
+                    try {
+                        const conn = peerRef.current.connect(roomHostId, { reliable: true });
+                        connRef.current = conn;
+                        conn.on('open', () => {
+                            setPeerConnected(true);
+                            conn.send(payload);
+                            console.log('Payload sent after reconnect:', payload);
+                            if (onComplete) onComplete();
+                        });
+                        conn.on('close', () => setPeerConnected(false));
+                    } catch (err) {
+                        console.error('Reconnect and send failed:', err);
+                        if (onComplete) onComplete();
+                    }
+                } else {
+                    if (onComplete) onComplete();
+                }
+            };
 
             // LocalStorage Auto-Save
             useEffect(() => {
@@ -164,11 +236,6 @@
             useEffect(() => {
                 localStorage.setItem('bansho_my_name', participantName);
             }, [participantName]);
-
-            const showToast = (msg) => {
-                setToastMessage(msg);
-                setTimeout(() => setToastMessage(null), 3000);
-            };
 
             const handleResetData = () => {
                 setCategories(INITIAL_CATEGORIES);
@@ -196,14 +263,10 @@
                     createdAt: timeStr
                 };
 
-                // P2Pで講師画面へ送信
-                if (appRole === 'participant' && connRef.current && connRef.current.open) {
-                    connRef.current.send({ type: 'NEW_CARD', card: newCard });
-                }
+                // P2P送信（確実送信ヘルパー利用）
+                sendP2pMessage({ type: 'NEW_CARD', card: newCard });
 
                 setCards(prev => [newCard, ...prev]);
-                
-                // 自分の投稿履歴に追加
                 setMyHistory(prev => [newCard, ...prev]);
 
                 setInputText('');
@@ -218,9 +281,11 @@
                 }
 
                 // P2Pで講師画面へ削除通知
-                if (appRole === 'participant' && connRef.current && connRef.current.open) {
-                    connRef.current.send({ type: 'DELETE_CARD', cardId: item.id, author: item.author });
-                }
+                sendP2pMessage({ 
+                    type: 'DELETE_CARD', 
+                    cardId: item.id, 
+                    author: item.author || participantName || '受講者' 
+                });
 
                 // 参加者の手元カード & 履歴から削除
                 setCards(prev => prev.filter(c => c.id !== item.id));
