@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.3.2)</title>
+    <title>板書・意見整理 AI (v1.4.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -53,7 +53,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.3.2";
+        const APP_VERSION = "v1.4.0";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -84,6 +84,12 @@
                 return saved ? JSON.parse(saved) : INITIAL_CARDS;
             });
 
+            // 過去の板書アーカイブ一覧
+            const [archives, setArchives] = useState(() => {
+                const saved = localStorage.getItem('bansho_archives');
+                return saved ? JSON.parse(saved) : [];
+            });
+
             // 自分の投稿履歴
             const [myHistory, setMyHistory] = useState(() => {
                 const saved = localStorage.getItem('bansho_my_history');
@@ -112,6 +118,9 @@
             const [showExportModal, setShowExportModal] = useState(false);
             const [showBulkModal, setShowBulkModal] = useState(false);
             const [showQrModal, setShowQrModal] = useState(false);
+            const [showArchiveModal, setShowArchiveModal] = useState(false);
+            const [showNewBoardModal, setShowNewBoardModal] = useState(false);
+            const [newSessionTitle, setNewSessionTitle] = useState('');
             const [bulkInputText, setBulkInputText] = useState('');
             const [newCategoryTitle, setNewCategoryTitle] = useState('');
             const [isAddingCategory, setIsAddingCategory] = useState(false);
@@ -334,15 +343,124 @@
 
             useEffect(() => {
                 localStorage.setItem('bansho_cards', JSON.stringify(cards));
-            }, [cards]);
+                if (appRole === 'board') {
+                    broadcastToClients({ type: 'SYNC_CARDS', cards });
+                }
+            }, [cards, appRole]);
+
+            useEffect(() => {
+                localStorage.setItem('bansho_archives', JSON.stringify(archives));
+            }, [archives]);
 
             useEffect(() => {
                 localStorage.setItem('bansho_my_history', JSON.stringify(myHistory));
             }, [myHistory]);
 
             useEffect(() => {
+                localStorage.setItem('bansho_my_votes', JSON.stringify(myVotes));
+            }, [myVotes]);
+
+            useEffect(() => {
                 localStorage.setItem('bansho_my_name', participantName);
             }, [participantName]);
+
+            // 新規板書モーダルを開く
+            const handleOpenNewBoardModal = () => {
+                const now = new Date();
+                const defaultTitle = `${now.getFullYear()}/${(now.getMonth()+1).toString().padStart(2,'0')}/${now.getDate().toString().padStart(2,'0')} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')} セッション`;
+                setNewSessionTitle(defaultTitle);
+                setShowNewBoardModal(true);
+            };
+
+            // 現在の板書をアーカイブ保存して新規開始
+            const handleSaveArchiveAndStartNew = () => {
+                const now = new Date();
+                const timeStr = `${now.getFullYear()}/${(now.getMonth()+1).toString().padStart(2,'0')}/${now.getDate().toString().padStart(2,'0')} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+                
+                const newArchive = {
+                    id: 'arch-' + Date.now(),
+                    title: newSessionTitle.trim() || `${timeStr} セッション`,
+                    savedAt: timeStr,
+                    cards: [...cards],
+                    categories: [...categories],
+                    summaries: { ...summaries },
+                    cardCount: cards.length,
+                    totalVotes: cards.reduce((sum, c) => sum + (c.votes || 0), 0)
+                };
+
+                setArchives(prev => [newArchive, ...prev]);
+                setCards([]);
+                setSummaries({});
+                setCategories(INITIAL_CATEGORIES);
+                setShowNewBoardModal(false);
+                showToast(`📁「${newArchive.title}」をアーカイブに記録し、新しい板書を開始しました！`);
+            };
+
+            // 保存せずに真っ新な板書を開始
+            const handleStartNewWithoutSaving = () => {
+                setCards([]);
+                setSummaries({});
+                setCategories(INITIAL_CATEGORIES);
+                setShowNewBoardModal(false);
+                showToast('新しい板書を開始しました（未分類・意見0件）');
+            };
+
+            // アーカイブを現在のボードに復元
+            const handleRestoreArchive = (archive) => {
+                if (cards.length > 0 && !confirm(`現在の作業中の板書は上書きされます。\n「${archive.title}」を復元しますか？`)) {
+                    return;
+                }
+                setCards(archive.cards || []);
+                setCategories(archive.categories || INITIAL_CATEGORIES);
+                setSummaries(archive.summaries || {});
+                setShowArchiveModal(false);
+                showToast(`🔄「${archive.title}」の板書を復元しました！`);
+            };
+
+            // アーカイブを削除
+            const handleDeleteArchive = (archiveId) => {
+                if (!confirm('この過去の板書ログを削除しますか？')) return;
+                setArchives(prev => prev.filter(a => a.id !== archiveId));
+                showToast('アーカイブを削除しました');
+            };
+
+            // アーカイブ用のMarkdown生成
+            const generateArchiveMarkdown = (arch) => {
+                let md = `# 板書レポート: ${arch.title}\n\n`;
+                md += `- **記録日時:** ${arch.savedAt}\n`;
+                md += `- **総意見数:** ${arch.cards ? arch.cards.length : 0}件\n`;
+                md += `- **総いいね数:** ${arch.totalVotes || 0}\n\n`;
+
+                const archCats = arch.categories || INITIAL_CATEGORIES;
+                const archCards = arch.cards || [];
+                const archSummaries = arch.summaries || {};
+
+                const uncategorized = archCards.filter(c => c.categoryId === null);
+                if (uncategorized.length > 0) {
+                    md += `## 📥 未分類 (${uncategorized.length}件)\n\n`;
+                    uncategorized.forEach(c => {
+                        md += `- ${c.text} (by ${c.author || '匿名'}, 👍 ${c.votes || 0})\n`;
+                    });
+                    md += `\n`;
+                }
+
+                archCats.forEach(cat => {
+                    const catCards = archCards.filter(c => c.categoryId === cat.id);
+                    md += `## ${cat.title} (${catCards.length}件)\n\n`;
+                    if (archSummaries[cat.id]) {
+                        md += `> 💡 **AI要約:** ${archSummaries[cat.id]}\n\n`;
+                    }
+                    if (catCards.length === 0) {
+                        md += `*(意見なし)*\n\n`;
+                    } else {
+                        catCards.forEach(c => {
+                            md += `- ${c.text} (by ${c.author || '匿名'}, 👍 ${c.votes || 0})\n`;
+                        });
+                        md += `\n`;
+                    }
+                });
+                return md;
+            };
 
             const handleResetData = () => {
                 setCategories(INITIAL_CATEGORIES);
@@ -603,6 +721,25 @@
                             {appRole === 'board' && !isParticipantOnly && (
                                 <>
                                     <button 
+                                        onClick={handleOpenNewBoardModal}
+                                        title="現在の板書を保存して新しい板書を開始"
+                                        className="bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
+                                        <i className="fa-solid fa-folder-plus text-amber-300"></i>
+                                        ✨ 新しい板書
+                                    </button>
+
+                                    <button 
+                                        onClick={() => setShowArchiveModal(true)}
+                                        title="過去の板書アーカイブ一覧を表示・復元"
+                                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+                                        <i className="fa-solid fa-box-archive text-indigo-400"></i>
+                                        📚 過去の記録
+                                        <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
+                                            {archives.length}
+                                        </span>
+                                    </button>
+
+                                    <button 
                                         onClick={() => setShowQrModal(true)}
                                         className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition">
                                         <i className="fa-solid fa-qrcode"></i>
@@ -612,9 +749,9 @@
                                     <button 
                                         onClick={handleAiCluster}
                                         disabled={isAiProcessing}
-                                        className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md flex items-center gap-2 transition active:scale-95 disabled:opacity-50">
+                                        className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold shadow-md flex items-center gap-2 transition active:scale-95 disabled:opacity-50">
                                         <i className={`fa-solid ${isAiProcessing ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'} text-amber-300`}></i>
-                                        {isAiProcessing ? 'AI自動解析中...' : '✨ AIで自動整理・グルーピング'}
+                                        {isAiProcessing ? 'AI自動解析中...' : '✨ AI整理'}
                                     </button>
 
                                     <button 
@@ -1195,6 +1332,154 @@
                                         <i className="fa-solid fa-copy"></i> クリップボードにコピー
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ✨ 新しい板書を開始モーダル */}
+                    {showNewBoardModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                        <i className="fa-solid fa-folder-plus text-amber-500"></i>
+                                        新しい板書を始める
+                                    </h3>
+                                    <button onClick={() => setShowNewBoardModal(false)} className="text-slate-400 hover:text-slate-600 text-sm">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+
+                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4 text-xs">
+                                    <p className="font-bold text-slate-700 mb-1">現在の板書ステータス:</p>
+                                    <div className="flex items-center gap-4 text-slate-600">
+                                        <span>💬 付箋意見: <b>{cards.length} 件</b></span>
+                                        <span>👍 いいね総数: <b>{cards.reduce((s, c) => s + (c.votes || 0), 0)}</b></span>
+                                    </div>
+                                </div>
+
+                                <div className="mb-5">
+                                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                        アーカイブ記録タイトル
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        value={newSessionTitle}
+                                        onChange={(e) => setNewSessionTitle(e.target.value)}
+                                        placeholder="例: 第1部 課題の洗い出し"
+                                        className="w-full border border-slate-300 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium"
+                                    />
+                                    <p className="text-[11px] text-slate-400 mt-1">
+                                        ※保存した板書は「📚 過去の記録」からいつでも閲覧・復元できます
+                                    </p>
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <button 
+                                        onClick={handleSaveArchiveAndStartNew}
+                                        className="w-full py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow transition flex items-center justify-center gap-1.5 active:scale-[0.99]">
+                                        <i className="fa-solid fa-box-archive"></i>
+                                        現在の板書をアーカイブに保存して新しく始める
+                                    </button>
+
+                                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                                        <button 
+                                            onClick={handleStartNewWithoutSaving}
+                                            className="text-[11px] text-slate-400 hover:text-rose-500 py-1.5 transition flex items-center gap-1">
+                                            <i className="fa-solid fa-trash-can text-[10px]"></i> 保存せずにクリアして開始
+                                        </button>
+                                        <button 
+                                            onClick={() => setShowNewBoardModal(false)}
+                                            className="text-xs text-slate-500 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition">
+                                            キャンセル
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 📚 過去の板書アーカイブ一覧モーダル */}
+                    {showArchiveModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[85vh]">
+                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                                    <div>
+                                        <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                            <i className="fa-solid fa-box-archive text-indigo-600"></i>
+                                            過去の板書アーカイブ記録
+                                            <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-mono font-bold">
+                                                {archives.length} 件
+                                            </span>
+                                        </h3>
+                                        <p className="text-xs text-slate-400 mt-0.5">記録された過去セッションの閲覧・復元・レポート出力ができます</p>
+                                    </div>
+                                    <button onClick={() => setShowArchiveModal(false)} className="text-slate-400 hover:text-slate-600 text-sm">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+
+                                {archives.length === 0 ? (
+                                    <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl my-auto">
+                                        <i className="fa-solid fa-folder-open text-3xl text-slate-300 mb-2"></i>
+                                        <p className="text-xs font-bold text-slate-500">まだアーカイブ記録はありません</p>
+                                        <p className="text-[11px] text-slate-400 mt-1">「✨ 新しい板書」を実行すると、現在の板書がここに自動保存されます</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3 flex-1 overflow-y-auto pr-1">
+                                        {archives.map(arch => (
+                                            <div 
+                                                key={arch.id}
+                                                className="bg-slate-50 hover:bg-slate-100/80 p-4 rounded-xl border border-slate-200 shadow-xs transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                                
+                                                <div className="space-y-1 min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <h4 className="text-xs font-bold text-slate-800 truncate">
+                                                            📁 {arch.title}
+                                                        </h4>
+                                                        <span className="text-[10px] text-slate-400 font-mono">
+                                                            🕒 {arch.savedAt}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-[11px] text-slate-600">
+                                                        <span>💬 <b>{arch.cardCount || (arch.cards ? arch.cards.length : 0)}</b> 件の意見</span>
+                                                        <span>👍 <b>{arch.totalVotes || 0}</b> いいね</span>
+                                                        {arch.summaries && Object.keys(arch.summaries).length > 0 && (
+                                                            <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded font-bold">
+                                                                💡 AI要約あり
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    <button 
+                                                        onClick={() => handleRestoreArchive(arch)}
+                                                        title="この板書を現在のボードに復元"
+                                                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs transition flex items-center gap-1 active:scale-95">
+                                                        <i className="fa-solid fa-rotate-left text-[10px]"></i> 復元
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => {
+                                                            const md = generateArchiveMarkdown(arch);
+                                                            navigator.clipboard.writeText(md);
+                                                            showToast(`「${arch.title}」のMarkdownをコピーしました！`);
+                                                        }}
+                                                        title="Markdown形式でクリップボードにコピー"
+                                                        className="px-2.5 py-1.5 bg-white hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-medium transition flex items-center gap-1 shadow-2xs">
+                                                        <i className="fa-solid fa-copy text-[10px]"></i> 出力
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleDeleteArchive(arch.id)}
+                                                        title="アーカイブを削除"
+                                                        className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition">
+                                                        <i className="fa-solid fa-trash-can text-xs"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
