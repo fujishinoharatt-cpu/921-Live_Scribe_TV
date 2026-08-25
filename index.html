@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.2.1)</title>
+    <title>板書・意見整理 AI (v1.2.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -51,7 +51,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.2.1";
+        const APP_VERSION = "v1.2.2";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -131,6 +131,10 @@
                                 if (data && data.type === 'NEW_CARD') {
                                     setCards(prev => [data.card, ...prev]);
                                     showToast(`📩 ${data.card.author || '受講者'}から意見が届きました！`);
+                                } else if (data && data.type === 'DELETE_CARD') {
+                                    // 参加者による送信取り消しを反映
+                                    setCards(prev => prev.filter(c => c.id !== data.cardId));
+                                    showToast(`🗑️ ${data.author || '受講者'}が意見の送信を取り消しました`);
                                 }
                             });
                         });
@@ -206,15 +210,27 @@
                 showToast('意見を送信しました！未分類へ追加されました。');
             };
 
-            // 履歴削除
-            const handleDeleteHistory = (id) => {
-                setMyHistory(prev => prev.filter(item => item.id !== id));
-                showToast('投稿履歴を削除しました');
+            // 送信取り消し（講師ボードからも連動削除）
+            const handleCancelSend = (item) => {
+                const preview = item.text.length > 15 ? item.text.substring(0, 15) + '...' : item.text;
+                if (!confirm(`「${preview}」の送信を取り消しますか？\n（講師ボードの付箋も自動削除されます）`)) {
+                    return;
+                }
+
+                // P2Pで講師画面へ削除通知
+                if (appRole === 'participant' && connRef.current && connRef.current.open) {
+                    connRef.current.send({ type: 'DELETE_CARD', cardId: item.id, author: item.author });
+                }
+
+                // 参加者の手元カード & 履歴から削除
+                setCards(prev => prev.filter(c => c.id !== item.id));
+                setMyHistory(prev => prev.filter(h => h.id !== item.id));
+                showToast('意見の送信を取り消しました（ボードからも削除）');
             };
 
-            // 履歴全クリア
+            // 履歴全クリア（手元の履歴表示消去）
             const handleClearHistory = () => {
-                if (confirm('投稿履歴をすべて削除しますか？')) {
+                if (confirm('投稿履歴ログをすべて消去しますか？\n（※既に送信されたボード上の付箋はそのまま残ります）')) {
                     setMyHistory([]);
                     showToast('投稿履歴をクリアしました');
                 }
@@ -563,18 +579,18 @@
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        <div className="flex items-center gap-1">
+                                                        <div className="flex items-center gap-1.5">
                                                             <button 
                                                                 onClick={() => handleReuseHistory(item)}
                                                                 title="この内容をもう一度入力欄にセット"
-                                                                className="text-slate-600 hover:text-slate-900 bg-white/60 hover:bg-white px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1">
+                                                                className="text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow-xs">
                                                                 <i className="fa-solid fa-arrow-rotate-left"></i> 再利用
                                                             </button>
                                                             <button 
-                                                                onClick={() => handleDeleteHistory(item.id)}
-                                                                title="履歴から削除"
-                                                                className="text-slate-500 hover:text-rose-600 p-1 text-[11px] transition">
-                                                                <i className="fa-solid fa-xmark"></i>
+                                                                onClick={() => handleCancelSend(item)}
+                                                                title="この意見の送信を取り消す（講師ボードからも削除）"
+                                                                className="text-rose-700 hover:text-white bg-rose-500/15 hover:bg-rose-600 px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 border border-rose-400/30">
+                                                                <i className="fa-solid fa-trash-can text-[9px]"></i> 取り消し
                                                             </button>
                                                         </div>
                                                     </div>
