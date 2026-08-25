@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.4.0)</title>
+    <title>板書・意見整理 AI (v1.4.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -53,7 +53,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.4.0";
+        const APP_VERSION = "v1.4.1";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -230,6 +230,11 @@
                     conn.on('data', (data) => {
                         if (data && data.type === 'SYNC_CARDS') {
                             setCards(data.cards);
+                        } else if (data && data.type === 'SESSION_STARTED') {
+                            showToast(`📢 新しい板書「${data.title || '新規セッション'}」が開始されました！`);
+                            setParticipantTab('post');
+                        } else if (data && data.type === 'SESSION_RESTORED') {
+                            showToast(`🔄 過去の板書「${data.title}」が画面に復元されました`);
                         }
                     });
                     conn.on('close', () => {
@@ -393,6 +398,7 @@
                 setSummaries({});
                 setCategories(INITIAL_CATEGORIES);
                 setShowNewBoardModal(false);
+                broadcastToClients({ type: 'SESSION_STARTED', title: newArchive.title });
                 showToast(`📁「${newArchive.title}」をアーカイブに記録し、新しい板書を開始しました！`);
             };
 
@@ -402,6 +408,7 @@
                 setSummaries({});
                 setCategories(INITIAL_CATEGORIES);
                 setShowNewBoardModal(false);
+                broadcastToClients({ type: 'SESSION_STARTED', title: '新しいセッション' });
                 showToast('新しい板書を開始しました（未分類・意見0件）');
             };
 
@@ -414,6 +421,7 @@
                 setCategories(archive.categories || INITIAL_CATEGORIES);
                 setSummaries(archive.summaries || {});
                 setShowArchiveModal(false);
+                broadcastToClients({ type: 'SESSION_RESTORED', title: archive.title });
                 showToast(`🔄「${archive.title}」の板書を復元しました！`);
             };
 
