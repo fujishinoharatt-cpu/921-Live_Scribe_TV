@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.2.0)</title>
+    <title>板書・意見整理 AI (v1.2.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -51,7 +51,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.2.0";
+        const APP_VERSION = "v1.2.1";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -68,7 +68,8 @@
 
         function App() {
             const urlParams = new URLSearchParams(window.location.search);
-            const initialRole = urlParams.get('role') === 'participant' ? 'participant' : 'board';
+            const isParticipantOnly = urlParams.get('role') === 'participant';
+            const initialRole = isParticipantOnly ? 'participant' : 'board';
             const roomHostId = urlParams.get('room') || 'workshop-main-room';
 
             const [appRole, setAppRole] = useState(initialRole);
@@ -81,7 +82,15 @@
                 return saved ? JSON.parse(saved) : INITIAL_CARDS;
             });
 
-            const [participantName, setParticipantName] = useState('');
+            // 自分の投稿履歴
+            const [myHistory, setMyHistory] = useState(() => {
+                const saved = localStorage.getItem('bansho_my_history');
+                return saved ? JSON.parse(saved) : [];
+            });
+
+            const [participantName, setParticipantName] = useState(() => {
+                return localStorage.getItem('bansho_my_name') || '';
+            });
             const [inputText, setInputText] = useState('');
             const [selectedColor, setSelectedColor] = useState('sticky-yellow');
             const [draggedCardId, setDraggedCardId] = useState(null);
@@ -112,6 +121,7 @@
                             const conn = peer.connect(roomHostId);
                             connRef.current = conn;
                             conn.on('open', () => setPeerConnected(true));
+                            conn.on('close', () => setPeerConnected(false));
                         }
                     });
 
@@ -143,6 +153,14 @@
                 localStorage.setItem('bansho_cards', JSON.stringify(cards));
             }, [cards]);
 
+            useEffect(() => {
+                localStorage.setItem('bansho_my_history', JSON.stringify(myHistory));
+            }, [myHistory]);
+
+            useEffect(() => {
+                localStorage.setItem('bansho_my_name', participantName);
+            }, [participantName]);
+
             const showToast = (msg) => {
                 setToastMessage(msg);
                 setTimeout(() => setToastMessage(null), 3000);
@@ -161,13 +179,17 @@
                 if (e) e.preventDefault();
                 if (!inputText.trim()) return;
 
+                const now = new Date();
+                const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
                 const newCard = {
                     id: 'c-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
                     text: inputText.trim(),
                     color: selectedColor,
                     categoryId: null,
                     votes: 0,
-                    author: participantName.trim() || (appRole === 'board' ? '講師' : '受講者')
+                    author: participantName.trim() || (appRole === 'board' ? '講師' : '受講者'),
+                    createdAt: timeStr
                 };
 
                 // P2Pで講師画面へ送信
@@ -176,8 +198,33 @@
                 }
 
                 setCards(prev => [newCard, ...prev]);
+                
+                // 自分の投稿履歴に追加
+                setMyHistory(prev => [newCard, ...prev]);
+
                 setInputText('');
                 showToast('意見を送信しました！未分類へ追加されました。');
+            };
+
+            // 履歴削除
+            const handleDeleteHistory = (id) => {
+                setMyHistory(prev => prev.filter(item => item.id !== id));
+                showToast('投稿履歴を削除しました');
+            };
+
+            // 履歴全クリア
+            const handleClearHistory = () => {
+                if (confirm('投稿履歴をすべて削除しますか？')) {
+                    setMyHistory([]);
+                    showToast('投稿履歴をクリアしました');
+                }
+            };
+
+            // 履歴から再利用
+            const handleReuseHistory = (item) => {
+                setInputText(item.text);
+                setSelectedColor(item.color);
+                showToast('履歴からテキストをセットしました');
             };
 
             const handleBulkAdd = () => {
@@ -321,34 +368,48 @@
                     <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between shadow-md z-20 shrink-0">
                         <div className="flex items-center space-x-3">
                             <div className="bg-indigo-600 text-white w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xl shadow-inner">
-                                <i className="fa-solid fa-chalkboard-user"></i>
+                                <i className={isParticipantOnly ? "fa-solid fa-mobile-screen" : "fa-solid fa-chalkboard-user"}></i>
                             </div>
                             <div>
                                 <h1 className="text-lg font-bold tracking-wide flex items-center gap-2">
-                                    板書・意見分類ボード
+                                    {isParticipantOnly ? "意見投稿フォーム" : "板書・意見分類ボード"}
                                     <span className="text-[11px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-bold">{APP_VERSION}</span>
-                                    <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-normal border border-slate-700">研修・講義モード</span>
+                                    <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-normal border border-slate-700">
+                                        {isParticipantOnly ? "参加者モード" : "研修・講義モード"}
+                                    </span>
                                 </h1>
-                                <p className="text-xs text-slate-400">参加者の意見をリアルタイム収集 ➔ AIで一元整理</p>
+                                <p className="text-xs text-slate-400">
+                                    {isParticipantOnly ? "あなたの意見をリアルタイムに全体ボードへ送信" : "参加者の意見をリアルタイム収集 ➔ AIで一元整理"}
+                                </p>
                             </div>
                         </div>
 
                         {/* Top Controls */}
                         <div className="flex items-center space-x-3">
-                            <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1">
-                                <button 
-                                    onClick={() => setAppRole('board')}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'board' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                    <i className="fa-solid fa-desktop"></i> 講師ボード
-                                </button>
-                                <button 
-                                    onClick={() => setAppRole('participant')}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'participant' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                    <i className="fa-solid fa-mobile-screen"></i> 参加者投稿画面
-                                </button>
-                            </div>
+                            {/* 参加者専用URLアクセス時は切り替えタブを非表示 */}
+                            {!isParticipantOnly ? (
+                                <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1">
+                                    <button 
+                                        onClick={() => setAppRole('board')}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'board' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                        <i className="fa-solid fa-desktop"></i> 講師ボード
+                                    </button>
+                                    <button 
+                                        onClick={() => setAppRole('participant')}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'participant' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                        <i className="fa-solid fa-mobile-screen"></i> 参加者投稿画面
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <span className="flex items-center gap-1.5 text-xs bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 px-3 py-1.5 rounded-xl">
+                                        <span className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                                        {peerConnected ? 'ボード接続中' : '待機中'}
+                                    </span>
+                                </div>
+                            )}
 
-                            {appRole === 'board' && (
+                            {appRole === 'board' && !isParticipantOnly && (
                                 <>
                                     <button 
                                         onClick={() => setShowQrModal(true)}
@@ -384,74 +445,146 @@
 
                     {appRole === 'participant' ? (
                         /* Participant View */
-                        <div className="flex-1 bg-slate-900 p-4 md:p-8 flex flex-col items-center justify-center overflow-y-auto">
-                            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100">
-                                <div className="text-center mb-6">
-                                    <span className="inline-block bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full mb-2">
-                                        📱 参加者 意見投稿フォーム
-                                    </span>
-                                    <h2 className="text-xl font-bold text-slate-800">意見・アイデアを送信</h2>
-                                    <p className="text-xs text-slate-500 mt-1">送信するとリアルタイムで全体ボードの「未分類」に届きます</p>
+                        <div className="flex-1 bg-slate-900 p-4 md:p-8 overflow-y-auto flex flex-col items-center">
+                            <div className="max-w-lg w-full space-y-6 my-auto py-4">
+                                {/* 投稿フォームカード */}
+                                <div className="bg-white rounded-3xl p-6 shadow-2xl border border-slate-100">
+                                    <div className="text-center mb-6">
+                                        <span className="inline-block bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full mb-2">
+                                            📱 参加者 意見投稿フォーム
+                                        </span>
+                                        <h2 className="text-xl font-bold text-slate-800">意見・アイデアを送信</h2>
+                                        <p className="text-xs text-slate-500 mt-1">送信するとリアルタイムで全体ボードの「未分類」に届きます</p>
+                                    </div>
+
+                                    <form onSubmit={handleAddCard} className="space-y-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-600 mb-1">お名前・ニックネーム (任意)</label>
+                                            <input 
+                                                type="text"
+                                                value={participantName}
+                                                onChange={(e) => setParticipantName(e.target.value)}
+                                                placeholder="例: 受講者A / 山田"
+                                                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-600 mb-1">付箋の色を選択</label>
+                                            <div className="flex items-center space-x-2 bg-slate-100 p-2 rounded-xl">
+                                                {[
+                                                    { id: 'sticky-yellow', bg: 'bg-yellow-300', label: '黄' },
+                                                    { id: 'sticky-green', bg: 'bg-emerald-300', label: '緑' },
+                                                    { id: 'sticky-blue', bg: 'bg-sky-300', label: '青' },
+                                                    { id: 'sticky-pink', bg: 'bg-pink-300', label: '赤' },
+                                                    { id: 'sticky-purple', bg: 'bg-purple-300', label: '紫' }
+                                                ].map(color => (
+                                                    <button
+                                                        key={color.id}
+                                                        type="button"
+                                                        onClick={() => setSelectedColor(color.id)}
+                                                        className={`flex-1 h-8 rounded-lg ${color.bg} flex items-center justify-center font-bold text-xs transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60'}`}>
+                                                        {selectedColor === color.id && '✓'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-600 mb-1">意見・アイデア本文</label>
+                                            <textarea
+                                                value={inputText}
+                                                onChange={(e) => setInputText(e.target.value)}
+                                                rows="3"
+                                                placeholder="例：付箋をグループ分けした後にAI要約が出ると次のディスカッションがスムーズに進みそう。"
+                                                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
+                                                required
+                                            ></textarea>
+                                        </div>
+
+                                        <button
+                                            type="submit"
+                                            className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-3.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm">
+                                            <i className="fa-solid fa-paper-plane"></i> 意見を送信する
+                                        </button>
+                                    </form>
+
+                                    {/* 講師画面から切り替えたときのみ戻るリンクを表示 */}
+                                    {!isParticipantOnly && (
+                                        <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+                                            <button 
+                                                onClick={() => setAppRole('board')}
+                                                className="text-xs text-indigo-600 hover:underline font-bold">
+                                                ← 講師用メインボード表示に戻る
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
 
-                                <form onSubmit={handleAddCard} className="space-y-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-600 mb-1">お名前・ニックネーム (任意)</label>
-                                        <input 
-                                            type="text"
-                                            value={participantName}
-                                            onChange={(e) => setParticipantName(e.target.value)}
-                                            placeholder="例: 受講者A / 山田"
-                                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                        />
+                                {/* 📜 自分の投稿履歴セクション */}
+                                <div className="bg-slate-800/90 rounded-3xl p-5 border border-slate-700 shadow-xl backdrop-blur-sm">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                            <i className="fa-solid fa-clock-rotate-left text-amber-400"></i>
+                                            あなたの投稿履歴
+                                            <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[11px] px-2 py-0.5 rounded-full font-mono">
+                                                {myHistory.length} 件
+                                            </span>
+                                        </h3>
+                                        {myHistory.length > 0 && (
+                                            <button 
+                                                onClick={handleClearHistory}
+                                                className="text-[11px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
+                                                <i className="fa-solid fa-trash-can text-[10px]"></i> 履歴クリア
+                                            </button>
+                                        )}
                                     </div>
 
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-600 mb-1">付箋の色を選択</label>
-                                        <div className="flex items-center space-x-2 bg-slate-100 p-2 rounded-xl">
-                                            {[
-                                                { id: 'sticky-yellow', bg: 'bg-yellow-300', label: '黄' },
-                                                { id: 'sticky-green', bg: 'bg-emerald-300', label: '緑' },
-                                                { id: 'sticky-blue', bg: 'bg-sky-300', label: '青' },
-                                                { id: 'sticky-pink', bg: 'bg-pink-300', label: '赤' },
-                                                { id: 'sticky-purple', bg: 'bg-purple-300', label: '紫' }
-                                            ].map(color => (
-                                                <button
-                                                    key={color.id}
-                                                    type="button"
-                                                    onClick={() => setSelectedColor(color.id)}
-                                                    className={`flex-1 h-8 rounded-lg ${color.bg} flex items-center justify-center font-bold text-xs transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60'}`}>
-                                                    {selectedColor === color.id && '✓'}
-                                                </button>
+                                    {myHistory.length === 0 ? (
+                                        <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-2xl">
+                                            <i className="fa-solid fa-feather-pointed text-2xl text-slate-600 mb-2"></i>
+                                            <p className="text-xs text-slate-400 font-medium">まだ投稿した意見はありません</p>
+                                            <p className="text-[11px] text-slate-500 mt-0.5">送信した意見はここに一覧として保存されます</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                                            {myHistory.map((item) => (
+                                                <div 
+                                                    key={item.id} 
+                                                    className={`${item.color} p-3 rounded-2xl border shadow-sm flex flex-col justify-between transition hover:shadow-md`}>
+                                                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded">
+                                                                {item.author || '受講者'}
+                                                            </span>
+                                                            {item.createdAt && (
+                                                                <span className="text-[10px] text-black/60 font-mono">
+                                                                    🕒 {item.createdAt}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-1">
+                                                            <button 
+                                                                onClick={() => handleReuseHistory(item)}
+                                                                title="この内容をもう一度入力欄にセット"
+                                                                className="text-slate-600 hover:text-slate-900 bg-white/60 hover:bg-white px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1">
+                                                                <i className="fa-solid fa-arrow-rotate-left"></i> 再利用
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => handleDeleteHistory(item.id)}
+                                                                title="履歴から削除"
+                                                                className="text-slate-500 hover:text-rose-600 p-1 text-[11px] transition">
+                                                                <i className="fa-solid fa-xmark"></i>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-xs font-medium leading-relaxed break-words text-slate-800">
+                                                        {item.text}
+                                                    </p>
+                                                </div>
                                             ))}
                                         </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-600 mb-1">意見・アイデア本文</label>
-                                        <textarea
-                                            value={inputText}
-                                            onChange={(e) => setInputText(e.target.value)}
-                                            rows="4"
-                                            placeholder="例：付箋をグループ分けした後にAI要約が出ると次のディスカッションがスムーズに進みそう。"
-                                            className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
-                                            required
-                                        ></textarea>
-                                    </div>
-
-                                    <button
-                                        type="submit"
-                                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm">
-                                        <i className="fa-solid fa-paper-plane"></i> 意見を送信する
-                                    </button>
-                                </form>
-
-                                <div className="mt-6 pt-4 border-t border-slate-100 text-center">
-                                    <button 
-                                        onClick={() => setAppRole('board')}
-                                        className="text-xs text-indigo-600 hover:underline font-bold">
-                                        ← 講師用メインボード表示に戻る
-                                    </button>
+                                    )}
                                 </div>
                             </div>
                         </div>
