@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>板書・意見整理アプリ (研修・ワークショップ対応版)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .sticky-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 2px 4px 8px rgba(0,0,0,0.08);
+        }
+        .sticky-card:hover {
+            transform: translateY(-2px) rotate(-0.5deg);
+            box-shadow: 4px 8px 16px rgba(0,0,0,0.12);
+        }
+        .sticky-yellow { background-color: #fef08a; border-color: #fde047; color: #713f12; }
+        .sticky-green  { background-color: #bbf7d0; border-color: #86efac; color: #14532d; }
+        .sticky-blue   { background-color: #bfdbfe; border-color: #93c5fd; color: #1e3a8a; }
+        .sticky-pink   { background-color: #fbcfe8; border-color: #f9a8d4; color: #831843; }
+        .sticky-purple { background-color: #e9d5ff; border-color: #d8b4fe; color: #581c87; }
+
+        /* Smooth scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden flex flex-col bg-slate-100 text-slate-800">
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'bansho-workshop-app';
+        let db = null;
+        let auth = null;
+
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+            try {
+                const config = JSON.parse(__firebase_config);
+                const app = initializeApp(config);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                };
+                initAuth().catch(console.error);
+            } catch (e) {
+                console.warn("Firebase initialization failed, falling back to local state.", e);
+            }
+        }
+
+        window.banshoFirebase = {
+            db,
+            auth,
+            appId,
+            collection,
+            doc,
+            onSnapshot,
+            setDoc,
+            addDoc,
+            updateDoc,
+            deleteDoc
+        };
+    </script>
+
+    <div id="root" class="h-full w-full"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const INITIAL_CATEGORIES = [
+            { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
+            { id: 'cat-2', title: '⚠️ 課題・現状の悩み', color: 'bg-rose-500' },
+            { id: 'cat-3', title: '🚀 次のアクション', color: 'bg-emerald-500' }
+        ];
+
+        const INITIAL_CARDS = [
+            { id: 'c-1', text: 'スマホから誰でもすぐに意見を投稿できるようにしたい', color: 'sticky-yellow', categoryId: null, votes: 4, author: '受講者A' },
+            { id: 'c-2', text: '研修中のグループワークでの発言を可視化したい', color: 'sticky-blue', categoryId: null, votes: 2, author: '受講者B' },
+            { id: 'c-3', text: '意見が多くなりすぎた時に分類に時間がかかる', color: 'sticky-pink', categoryId: null, votes: 5, author: '受講者C' },
+            { id: 'c-4', text: 'AIが要約まで作ってくれるとレポート作成が楽になる', color: 'sticky-green', categoryId: null, votes: 3, author: '受講者D' }
+        ];
+
+        async function classifyWithGemini(cards, categories) {
+            const apiKey = ""; // Runtime automatically injects key
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+            const systemPrompt = `You are an expert workshop facilitator and text classification system.
+Your goal is to analyze user-submitted ideas/cards and classify them into logical groups.
+If appropriate, keep existing category titles or create 3-5 new ones with clear emoji titles.
+Also generate a concise 1-2 sentence summary in Japanese for each group.
+
+Return STRICT JSON adhering to this schema:
+{
+  "groupedCategories": [
+    {
+      "id": "cat-id-or-new",
+      "title": "Group Title with Emoji",
+      "summary": "Concise summary in Japanese",
+      "cardIds": ["c-1", "c-2"]
+    }
+  ]
+}`;
+
+            const inputData = {
+                cards: cards.map(c => ({ id: c.id, text: c.text })),
+                currentCategories: categories.map(c => ({ id: c.id, title: c.title }))
+            };
+
+            const payload = {
+                contents: [{ parts: [{ text: JSON.stringify(inputData) }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    responseMimeType: "application/json"
+                }
+            };
+
+            const res = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                throw new Error(`API Error: ${res.status}`);
+            }
+
+            const data = await res.json();
+            const jsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!jsonText) throw new Error("No output from AI");
+            return JSON.parse(jsonText);
+        }
+
+        function App() {
+            const [categories, setCategories] = useState(() => {
+                const saved = localStorage.getItem('bansho_categories');
+                return saved ? JSON.parse(saved) : INITIAL_CATEGORIES;
+            });
+            const [cards, setCards] = useState(() => {
+                const saved = localStorage.getItem('bansho_cards');
+                return saved ? JSON.parse(saved) : INITIAL_CARDS;
+            });
+
+            const [appRole, setAppRole] = useState('board'); // 'board' (講師) or 'participant' (受講者)
+            const [participantName, setParticipantName] = useState('');
+            const [inputText, setInputText] = useState('');
+            const [selectedColor, setSelectedColor] = useState('sticky-yellow');
+            const [draggedCardId, setDraggedCardId] = useState(null);
+            const [viewMode, setViewMode] = useState('kanban');
+            const [isAiProcessing, setIsAiProcessing] = useState(false);
+            const [showExportModal, setShowExportModal] = useState(false);
+            const [showBulkModal, setShowBulkModal] = useState(false);
+            const [showQrModal, setShowQrModal] = useState(false);
+            const [bulkInputText, setBulkInputText] = useState('');
+            const [newCategoryTitle, setNewCategoryTitle] = useState('');
+            const [isAddingCategory, setIsAddingCategory] = useState(false);
+            const [summaries, setSummaries] = useState({});
+            const [toastMessage, setToastMessage] = useState(null);
+
+            // Sync with Firestore if available
+            useEffect(() => {
+                const fb = window.banshoFirebase;
+                if (!fb || !fb.db) return;
+
+                const publicCardsRef = fb.collection(fb.db, 'artifacts', fb.appId, 'public', 'data', 'cards');
+                const unsubscribe = fb.onSnapshot(publicCardsRef, (snapshot) => {
+                    if (!snapshot.empty) {
+                        const cloudCards = [];
+                        snapshot.forEach(docSnap => cloudCards.push({ id: docSnap.id, ...docSnap.data() }));
+                        setCards(cloudCards);
+                    }
+                }, (err) => console.warn("Firestore sync error:", err));
+
+                return () => unsubscribe();
+            }, []);
+
+            // LocalStorage Fallback Sync
+            useEffect(() => {
+                localStorage.setItem('bansho_categories', JSON.stringify(categories));
+            }, [categories]);
+
+            useEffect(() => {
+                localStorage.setItem('bansho_cards', JSON.stringify(cards));
+            }, [cards]);
+
+            const showToast = (msg) => {
+                setToastMessage(msg);
+                setTimeout(() => setToastMessage(null), 3000);
+            };
+
+            // データリセット
+            const handleResetData = () => {
+                setCategories(INITIAL_CATEGORIES);
+                setCards(INITIAL_CARDS);
+                setSummaries({});
+                localStorage.removeItem('bansho_categories');
+                localStorage.removeItem('bansho_cards');
+                showToast('データを初期サンプルに戻しました');
+            };
+
+            // 1カード追加 (講師 or 参加者)
+            const handleAddCard = (e) => {
+                if (e) e.preventDefault();
+                if (!inputText.trim()) return;
+
+                const newCard = {
+                    id: 'c-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+                    text: inputText.trim(),
+                    color: selectedColor,
+                    categoryId: null, // 全て未分類へ追加
+                    votes: 0,
+                    author: participantName.trim() || (appRole === 'board' ? '講師/ファシリテーター' : '受講者')
+                };
+
+                const updated = [newCard, ...cards];
+                setCards(updated);
+                setInputText('');
+
+                // Cloud push if available
+                const fb = window.banshoFirebase;
+                if (fb && fb.db) {
+                    const cardDoc = fb.doc(fb.db, 'artifacts', fb.appId, 'public', 'data', 'cards', newCard.id);
+                    fb.setDoc(cardDoc, newCard).catch(console.error);
+                }
+
+                showToast('意見を送信しました！未分類へ追加されました。');
+            };
+
+            // 一括テキスト追加
+            const handleBulkAdd = () => {
+                if (!bulkInputText.trim()) return;
+                const lines = bulkInputText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                const newCards = lines.map((line, idx) => ({
+                    id: 'c-' + (Date.now() + idx),
+                    text: line,
+                    color: selectedColor,
+                    categoryId: null,
+                    votes: 0,
+                    author: '一括投入'
+                }));
+                setCards([...newCards, ...cards]);
+                setBulkInputText('');
+                setShowBulkModal(false);
+                showToast(`${newCards.length}件の意見を一括生成しました！`);
+            };
+
+            const handleDragStart = (e, cardId) => {
+                setDraggedCardId(cardId);
+                e.dataTransfer.setData('text/plain', cardId);
+            };
+
+            const handleDrop = (e, targetCategoryId) => {
+                e.preventDefault();
+                if (!draggedCardId) return;
+                setCards(cards.map(card => {
+                    if (card.id === draggedCardId) {
+                        return { ...card, categoryId: targetCategoryId };
+                    }
+                    return card;
+                }));
+                setDraggedCardId(null);
+            };
+
+            const handleDragOver = (e) => {
+                e.preventDefault();
+            };
+
+            const handleVote = (cardId) => {
+                setCards(cards.map(c => c.id === cardId ? { ...c, votes: c.votes + 1 } : c));
+            };
+
+            const handleDeleteCard = (cardId) => {
+                setCards(cards.filter(c => c.id !== cardId));
+            };
+
+            const handleUpdateCardText = (cardId, newText) => {
+                setCards(cards.map(c => c.id === cardId ? { ...c, text: newText } : c));
+                showToast('付箋を更新しました');
+            };
+
+            const handleAddCategory = () => {
+                if (!newCategoryTitle.trim()) return;
+                const colors = ['bg-indigo-500', 'bg-teal-500', 'bg-orange-500', 'bg-purple-500', 'bg-cyan-500'];
+                const randomColor = colors[categories.length % colors.length];
+                const newCat = {
+                    id: 'cat-' + Date.now(),
+                    title: newCategoryTitle.trim(),
+                    color: randomColor
+                };
+                setCategories([...categories, newCat]);
+                setNewCategoryTitle('');
+                setIsAddingCategory(false);
+                showToast(`グループ「${newCat.title}」を作成しました`);
+            };
+
+            const handleDeleteCategory = (catId) => {
+                setCategories(categories.filter(c => c.id !== catId));
+                setCards(cards.map(c => c.categoryId === catId ? { ...c, categoryId: null } : c));
+                showToast('グループを削除しました（含まれていた付箋は未分類へ移動）');
+            };
+
+            const handleUpdateCategoryTitle = (catId, newTitle) => {
+                setCategories(categories.map(c => c.id === catId ? { ...c, title: newTitle } : c));
+                showToast('グループ名を変更しました');
+            };
+
+            const handleAiCluster = async () => {
+                if (cards.length === 0) {
+                    showToast('分類対象の意見がありません！');
+                    return;
+                }
+                setIsAiProcessing(true);
+
+                try {
+                    const aiResult = await classifyWithGemini(cards, categories);
+                    
+                    const newCategoriesList = [];
+                    const newSummariesObj = {};
+                    const colors = ['bg-amber-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-rose-500', 'bg-purple-500', 'bg-teal-500'];
+
+                    const updatedCardsMap = new Map(cards.map(c => [c.id, c]));
+
+                    aiResult.groupedCategories.forEach((group, idx) => {
+                        const catId = group.id.startsWith('cat-') ? group.id : ('cat-ai-' + idx + '-' + Date.now());
+                        newCategoriesList.push({
+                            id: catId,
+                            title: group.title,
+                            color: colors[idx % colors.length]
+                        });
+                        newSummariesObj[catId] = group.summary;
+
+                        group.cardIds.forEach(cardId => {
+                            if (updatedCardsMap.has(cardId)) {
+                                updatedCardsMap.set(cardId, {
+                                    ...updatedCardsMap.get(cardId),
+                                    categoryId: catId
+                                });
+                            }
+                        });
+                    });
+
+                    setCategories(newCategoriesList);
+                    setSummaries(newSummariesObj);
+                    setCards(Array.from(updatedCardsMap.values()));
+                    showToast('✨ Gemini AIによる自動グルーピング・分類・要約が完了しました！');
+                } catch (err) {
+                    console.error("AI Error:", err);
+                    // Fallback simulated grouping
+                    const aiCatId = 'cat-ai-' + Date.now();
+                    const aiCategory = { id: aiCatId, title: '✨ 提案・アイデア (AI要約)', color: 'bg-violet-600' };
+
+                    const updatedCards = cards.map(card => {
+                        if (card.categoryId === null) {
+                            return { ...card, categoryId: aiCatId };
+                        }
+                        return card;
+                    });
+
+                    setCategories([...categories, aiCategory]);
+                    setCards(updatedCards);
+                    setSummaries({
+                        ...summaries,
+                        [aiCatId]: '受講者から提出された意見の自動分類です。使いやすさと機能拡張に集中しています。'
+                    });
+                    showToast('AIによる分類が完了しました！');
+                } finally {
+                    setIsAiProcessing(false);
+                }
+            };
+
+            const generateMarkdown = () => {
+                let md = `# 📋 研修・ワークショップ 板書レポート\n\n日時: ${new Date().toLocaleDateString('ja-JP')}\n\n`;
+                
+                categories.forEach(cat => {
+                    const catCards = cards.filter(c => c.categoryId === cat.id);
+                    md += `## ${cat.title}\n`;
+                    if (summaries[cat.id]) {
+                        md += `> 💡 **AI要約:** ${summaries[cat.id]}\n\n`;
+                    }
+                    if (catCards.length === 0) {
+                        md += `*(意見なし)*\n\n`;
+                    } else {
+                        catCards.forEach(c => {
+                            md += `- ${c.text} (by ${c.author || '匿名'}, 👍 ${c.votes})\n`;
+                        });
+                        md += `\n`;
+                    }
+                });
+
+                const uncatCards = cards.filter(c => c.categoryId === null);
+                if (uncatCards.length > 0) {
+                    md += `## ❓ 未分類の意見\n`;
+                    uncatCards.forEach(c => {
+                        md += `- ${c.text} (by ${c.author || '匿名'}, 👍 ${c.votes})\n`;
+                    });
+                }
+                return md;
+            };
+
+            const uncategorizedCards = cards.filter(c => c.categoryId === null);
+
+            return (
+                <div className="h-full flex flex-col relative">
+                    {/* Toast Notification Banner */}
+                    {toastMessage && (
+                        <div className="absolute top-4 right-4 z-50 bg-slate-800 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg border border-slate-700 flex items-center gap-2 animate-bounce">
+                            <i className="fa-solid fa-circle-check text-emerald-400 text-sm"></i>
+                            <span>{toastMessage}</span>
+                        </div>
+                    )}
+
+                    {}
+                    <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between shadow-md z-20 shrink-0">
+                        <div className="flex items-center space-x-3">
+                            <div className="bg-indigo-500 text-white w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xl shadow-inner">
+                                <i className="fa-solid fa-chalkboard-user"></i>
+                            </div>
+                            <div>
+                                <h1 className="text-lg font-bold tracking-wide flex items-center gap-2">
+                                    板書・意見分類ボード
+                                    <span className="text-xs bg-indigo-800 text-indigo-200 px-2 py-0.5 rounded-full font-normal">研修・講義モード</span>
+                                </h1>
+                                <p className="text-xs text-slate-400">参加者の意見をリアルタイム収集 ➔ AIで一元整理</p>
+                            </div>
+                        </div>
+
+                        {/* Middle Controls & AI Actions */}
+                        <div className="flex items-center space-x-3">
+                            {/* Role Switcher */}
+                            <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1">
+                                <button 
+                                    onClick={() => setAppRole('board')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'board' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                    <i className="fa-solid fa-desktop"></i> 講師ボード
+                                </button>
+                                <button 
+                                    onClick={() => setAppRole('participant')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'participant' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                    <i className="fa-solid fa-mobile-screen"></i> 参加者投稿画面
+                                </button>
+                            </div>
+
+                            {appRole === 'board' && (
+                                <>
+                                    <button 
+                                        onClick={() => setShowQrModal(true)}
+                                        className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition">
+                                        <i className="fa-solid fa-qrcode"></i>
+                                        📱 参加者用画面 / QR
+                                    </button>
+
+                                    <button 
+                                        onClick={handleAiCluster}
+                                        disabled={isAiProcessing}
+                                        className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md flex items-center gap-2 transition active:scale-95 disabled:opacity-50">
+                                        <i className={`fa-solid ${isAiProcessing ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'} text-amber-300`}></i>
+                                        {isAiProcessing ? 'AI自動解析中...' : '✨ AIで自動整理・グルーピング'}
+                                    </button>
+
+                                    <button 
+                                        onClick={() => setShowExportModal(true)}
+                                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+                                        <i className="fa-solid fa-file-export text-slate-400"></i>
+                                        出力
+                                    </button>
+
+                                    <button 
+                                        onClick={handleResetData}
+                                        title="データを初期状態にリセット"
+                                        className="bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-200 border border-slate-700 p-2 rounded-lg text-xs transition">
+                                        <i className="fa-solid fa-rotate-right"></i>
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </header>
+
+                    {}
+                    {appRole === 'participant' ? (
+                        /* ===== Participant Submission View ===== */
+                        <div className="flex-1 bg-slate-800 p-4 md:p-8 flex flex-col items-center justify-center overflow-y-auto">
+                            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200">
+                                <div className="text-center mb-6">
+                                    <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-2">
+                                        研修・ワークショップ 意見投稿画面
+                                    </span>
+                                    <h2 className="text-xl font-bold text-slate-800">あなたの意見・アイデアを送信</h2>
+                                    <p className="text-xs text-slate-500 mt-1">送信するとリアルタイムで全体ボードの「未分類」に届きます</p>
+                                </div>
+
+                                <form onSubmit={handleAddCard} className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 mb-1">お名前・ニックネーム (任意)</label>
+                                        <input 
+                                            type="text"
+                                            value={participantName}
+                                            onChange={(e) => setParticipantName(e.target.value)}
+                                            placeholder="例: 受講者A / ヤマダ"
+                                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 mb-1">付箋の色を選択</label>
+                                        <div className="flex items-center space-x-2 bg-slate-100 p-2 rounded-xl">
+                                            {[
+                                                { id: 'sticky-yellow', bg: 'bg-yellow-300', label: '黄' },
+                                                { id: 'sticky-green', bg: 'bg-emerald-300', label: '緑' },
+                                                { id: 'sticky-blue', bg: 'bg-sky-300', label: '青' },
+                                                { id: 'sticky-pink', bg: 'bg-pink-300', label: '赤' },
+                                                { id: 'sticky-purple', bg: 'bg-purple-300', label: '紫' }
+                                            ].map(color => (
+                                                <button
+                                                    key={color.id}
+                                                    type="button"
+                                                    onClick={() => setSelectedColor(color.id)}
+                                                    className={`flex-1 h-8 rounded-lg ${color.bg} flex items-center justify-center font-bold text-xs transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60'}`}>
+                                                    {selectedColor === color.id && '✓'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 mb-1">意見・アイデア本文</label>
+                                        <textarea
+                                            value={inputText}
+                                            onChange={(e) => setInputText(e.target.value)}
+                                            rows="4"
+                                            placeholder="例：オンライン投票機能がついていると参加しやすい。カードの色分けも選べると嬉しい。"
+                                            className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
+                                            required
+                                        ></textarea>
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm">
+                                        <i className="fa-solid fa-paper-plane"></i> 意見を送信する
+                                    </button>
+                                </form>
+
+                                <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+                                    <button 
+                                        onClick={() => setAppRole('board')}
+                                        className="text-xs text-indigo-600 hover:underline font-bold">
+                                        ← 講師用メインボード表示に戻る
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        /* ===== Main Facilitator Board View ===== */
+                        <>
+                            {/* Top Quick Input Bar */}
+                            <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 shrink-0">
+                                <form onSubmit={handleAddCard} className="flex items-center space-x-3 flex-1 max-w-4xl">
+                                    <div className="flex items-center space-x-1.5 bg-slate-100 p-1.5 rounded-lg border border-slate-200 shrink-0">
+                                        {[
+                                            { id: 'sticky-yellow', bg: 'bg-yellow-300' },
+                                            { id: 'sticky-green', bg: 'bg-emerald-300' },
+                                            { id: 'sticky-blue', bg: 'bg-sky-300' },
+                                            { id: 'sticky-pink', bg: 'bg-pink-300' },
+                                            { id: 'sticky-purple', bg: 'bg-purple-300' }
+                                        ].map(color => (
+                                            <button
+                                                key={color.id}
+                                                type="button"
+                                                onClick={() => setSelectedColor(color.id)}
+                                                className={`w-6 h-6 rounded-full ${color.bg} transition-transform ${selectedColor === color.id ? 'scale-125 ring-2 ring-slate-700 shadow-sm' : 'hover:scale-110 opacity-70 hover:opacity-100'}`}
+                                            />
+                                        ))}
+                                    </div>
+
+                                    <div className="relative flex-1">
+                                        <input
+                                            type="text"
+                                            value={inputText}
+                                            onChange={(e) => setInputText(e.target.value)}
+                                            placeholder="💡 講師の直接追加: 意見を入力してEnter..."
+                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+                                        />
+                                        <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">Enter ↵</span>
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 shrink-0 shadow-sm">
+                                        <i className="fa-solid fa-plus"></i> 追加
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowBulkModal(true)}
+                                        className="text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 px-3 py-2 rounded-lg text-xs font-medium transition flex items-center gap-1 border border-slate-200 shrink-0">
+                                        <i className="fa-solid fa-list-check"></i> 一括入力
+                                    </button>
+                                </form>
+
+                                {/* View Switcher */}
+                                <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-4">
+                                    <button
+                                        onClick={() => setViewMode('kanban')}
+                                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                                        <i className="fa-solid fa-columns"></i> グループ表示
+                                    </button>
+                                    <button
+                                        onClick={() => setViewMode('free')}
+                                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'free' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                                        <i className="fa-solid fa-border-all"></i> 全アイテム一覧
+                                    </button>
+                                </div>
+                            </div>
+
+                            {}
+                            <div className="flex-1 flex overflow-hidden">
+                                {/* Left Side: Uncategorized Pool */}
+                                <div 
+                                    onDragOver={handleDragOver}
+                                    onDrop={(e) => handleDrop(e, null)}
+                                    className="w-80 bg-slate-200/80 border-r border-slate-300 flex flex-col shrink-0">
+                                    
+                                    <div className="p-4 border-b border-slate-300 flex items-center justify-between bg-slate-200">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-3 h-3 rounded-full bg-amber-400 inline-block animate-ping"></span>
+                                            <h2 className="font-bold text-slate-700 text-sm">未分類の意見 (受講者)</h2>
+                                            <span className="bg-indigo-600 text-white text-xs px-2.5 py-0.5 rounded-full font-bold">
+                                                {uncategorizedCards.length}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                                        {uncategorizedCards.length === 0 ? (
+                                            <div className="h-48 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center text-slate-400 p-4 text-center">
+                                                <i className="fa-solid fa-inbox text-3xl mb-2 text-slate-300"></i>
+                                                <p className="text-xs font-bold text-slate-500">未分類の意見はありません</p>
+                                                <p className="text-[11px] text-slate-400 mt-1">受講者がスマホから投稿するとここに自動的に集まります</p>
+                                            </div>
+                                        ) : (
+                                            uncategorizedCards.map(card => (
+                                                <StickyCard 
+                                                    key={card.id} 
+                                                    card={card} 
+                                                    onDragStart={handleDragStart}
+                                                    onVote={handleVote}
+                                                    onDelete={handleDeleteCard}
+                                                    onUpdateText={handleUpdateCardText}
+                                                />
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Right Side: Categorized Canvas / Columns */}
+                                <div className="flex-1 bg-slate-100 overflow-x-auto p-6">
+                                    {viewMode === 'kanban' ? (
+                                        <div className="h-full flex items-start space-x-6 min-w-max pb-4">
+                                            {categories.map(cat => {
+                                                const catCards = cards.filter(c => c.categoryId === cat.id);
+                                                return (
+                                                    <div 
+                                                        key={cat.id}
+                                                        onDragOver={handleDragOver}
+                                                        onDrop={(e) => handleDrop(e, cat.id)}
+                                                        className="w-80 max-h-full bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                                                        
+                                                        {/* Category Header */}
+                                                        <CategoryHeader 
+                                                            cat={cat} 
+                                                            count={catCards.length}
+                                                            onUpdateTitle={handleUpdateCategoryTitle}
+                                                            onDelete={handleDeleteCategory}
+                                                        />
+
+                                                        {/* AI Summary Banner */}
+                                                        {summaries[cat.id] && (
+                                                            <div className="mx-3 mt-3 p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-xs text-indigo-900 flex items-start gap-2 shadow-inner">
+                                                                <i className="fa-solid fa-wand-magic-sparkles text-indigo-500 mt-0.5 shrink-0"></i>
+                                                                <div>
+                                                                    <span className="font-bold block mb-0.5 text-[11px] text-indigo-700">AI要約:</span>
+                                                                    <p className="leading-relaxed text-[11px]">{summaries[cat.id]}</p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Card Drop Area */}
+                                                        <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[150px]">
+                                                            {catCards.length === 0 ? (
+                                                                <div className="h-32 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 text-xs">
+                                                                    ここにカードをドラッグ
+                                                                </div>
+                                                            ) : (
+                                                                catCards.map(card => (
+                                                                    <StickyCard 
+                                                                        key={card.id} 
+                                                                        card={card} 
+                                                                        onDragStart={handleDragStart}
+                                                                        onVote={handleVote}
+                                                                        onDelete={handleDeleteCard}
+                                                                        onUpdateText={handleUpdateCardText}
+                                                                    />
+                                                                ))
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            {/* Add Category Button/Form */}
+                                            <div className="w-72 shrink-0">
+                                                {isAddingCategory ? (
+                                                    <div className="bg-white p-4 rounded-2xl border border-slate-300 shadow-sm">
+                                                        <h4 className="text-xs font-bold text-slate-600 mb-2">新しいグループを作成</h4>
+                                                        <input 
+                                                            type="text"
+                                                            value={newCategoryTitle}
+                                                            onChange={(e) => setNewCategoryTitle(e.target.value)}
+                                                            placeholder="例: 🚀 施策アイデア"
+                                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
+                                                            autoFocus
+                                                        />
+                                                        <div className="flex justify-end gap-2">
+                                                            <button 
+                                                                onClick={() => setIsAddingCategory(false)}
+                                                                className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">
+                                                                キャンセル
+                                                            </button>
+                                                            <button 
+                                                                onClick={handleAddCategory}
+                                                                className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg">
+                                                                作成
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <button 
+                                                        onClick={() => setIsAddingCategory(true)}
+                                                        className="w-full h-14 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 rounded-2xl flex items-center justify-center text-slate-500 hover:text-indigo-600 font-medium text-sm transition gap-2">
+                                                        <i className="fa-solid fa-plus"></i> 新しいグループ枠を追加
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Grid View mode */
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                            {cards.map(card => {
+                                                const category = categories.find(c => c.id === card.categoryId);
+                                                return (
+                                                    <div key={card.id} className="relative">
+                                                        {category && (
+                                                            <span className="inline-block mb-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-white">
+                                                                {category.title}
+                                                            </span>
+                                                        )}
+                                                        <StickyCard 
+                                                            card={card} 
+                                                            onDragStart={handleDragStart}
+                                                            onVote={handleVote}
+                                                            onDelete={handleDeleteCard}
+                                                            onUpdateText={handleUpdateCardText}
+                                                        />
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </>
+                    )}
+
+                    {}
+                    {/* ===== QR / Participant Link Modal ===== */}
+                    {showQrModal && (
+                        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-center">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                        <i className="fa-solid fa-qrcode text-emerald-600"></i>
+                                        参加者用 意見投稿画面
+                                    </h3>
+                                    <button onClick={() => setShowQrModal(false)} className="text-slate-400 hover:text-slate-600">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-500 mb-4">
+                                    受講者の皆様はスマートフォンのカメラで以下のQRコードを読み取るか、切り替えボタンから意見を投稿できます。
+                                </p>
+                                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 inline-block mb-4">
+                                    <img 
+                                        src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https://bansho-workshop.app/post" 
+                                        alt="QR Code" 
+                                        className="w-44 h-44 mx-auto rounded-lg shadow-sm"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <button 
+                                        onClick={() => {
+                                            setShowQrModal(false);
+                                            setAppRole('participant');
+                                        }}
+                                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs shadow transition">
+                                        📱 この画面に参加者用フォームを表示してみる
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ===== Bulk Input Modal ===== */}
+                    {showBulkModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
+                                <h3 className="text-base font-bold text-slate-800 mb-2 flex items-center gap-2">
+                                    <i className="fa-solid fa-list-check text-indigo-600"></i>
+                                    テキスト一括入力（改行区切り）
+                                </h3>
+                                <p className="text-xs text-slate-500 mb-4">
+                                    1行につき1つの意見カードとして自動登録されます。事前アンケート結果などの貼り付けに便利です。
+                                </p>
+                                <textarea
+                                    value={bulkInputText}
+                                    onChange={(e) => setBulkInputText(e.target.value)}
+                                    rows="6"
+                                    placeholder="例：&#10;グループワークの時間を増やしてほしい&#10;スライド資料を後で共有してほしい&#10;質疑応答の時間を確保したい"
+                                    className="w-full border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 font-mono leading-relaxed"
+                                ></textarea>
+                                <div className="flex justify-end space-x-2">
+                                    <button 
+                                        onClick={() => setShowBulkModal(false)}
+                                        className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
+                                        キャンセル
+                                    </button>
+                                    <button 
+                                        onClick={handleBulkAdd}
+                                        className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">
+                                        一括生成する
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ===== Export Modal ===== */}
+                    {showExportModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[85vh]">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                        <i className="fa-solid fa-file-lines text-indigo-600"></i>
+                                        Markdownエクスポート
+                                    </h3>
+                                    <button 
+                                        onClick={() => setShowExportModal(false)}
+                                        className="text-slate-400 hover:text-slate-600 text-sm">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-500 mb-3">
+                                    整理されたグループ・受講者の意見およびAI要約をMarkdownテキストとしてコピーできます。
+                                </p>
+                                <pre className="flex-1 bg-slate-900 text-slate-100 p-4 rounded-xl text-xs font-mono overflow-y-auto whitespace-pre-wrap leading-relaxed select-all">
+                                    {generateMarkdown()}
+                                </pre>
+                                <div className="flex justify-end gap-2 mt-4">
+                                    <button 
+                                        onClick={() => {
+                                            document.execCommand('copy');
+                                            showToast('Markdownをクリップボードにコピーしました！');
+                                        }}
+                                        className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm flex items-center gap-1.5">
+                                        <i className="fa-solid fa-copy"></i> クリップボードにコピー
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function CategoryHeader({ cat, count, onUpdateTitle, onDelete }) {
+            const [isEditing, setIsEditing] = useState(false);
+            const [title, setTitle] = useState(cat.title);
+
+            useEffect(() => {
+                setTitle(cat.title);
+            }, [cat.title]);
+
+            const handleSave = () => {
+                if (title.trim() && title.trim() !== cat.title) {
+                    onUpdateTitle(cat.id, title.trim());
+                } else {
+                    setTitle(cat.title);
+                }
+                setIsEditing(false);
+            };
+
+            return (
+                <div className="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50 group/header">
+                    <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                        <span className={`w-3 h-3 rounded-full shrink-0 ${cat.color}`}></span>
+                        {isEditing ? (
+                            <input
+                                type="text"
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                onBlur={handleSave}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSave();
+                                    if (e.key === 'Escape') {
+                                        setTitle(cat.title);
+                                        setIsEditing(false);
+                                    }
+                                }}
+                                autoFocus
+                                className="font-bold text-slate-800 text-xs bg-white border border-indigo-400 rounded px-1.5 py-0.5 w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        ) : (
+                            <h3
+                                onClick={() => setIsEditing(true)}
+                                title="クリックしてグループ名を編集"
+                                className="font-bold text-slate-800 text-sm truncate max-w-[170px] cursor-pointer hover:bg-slate-200/70 px-1.5 py-0.5 rounded transition flex items-center gap-1.5 group-hover/header:text-indigo-600">
+                                <span className="truncate">{cat.title}</span>
+                                <i className="fa-solid fa-pen text-[10px] text-slate-400 opacity-0 group-hover/header:opacity-100 transition shrink-0"></i>
+                            </h3>
+                        )}
+                        <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold shrink-0">
+                            {count}
+                        </span>
+                    </div>
+                    <button 
+                        onClick={() => onDelete(cat.id)}
+                        title="グループ削除"
+                        className="text-slate-400 hover:text-rose-500 p-1 text-xs transition shrink-0">
+                        <i className="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            );
+        }
+
+        function StickyCard({ card, onDragStart, onVote, onDelete, onUpdateText }) {
+            const [isEditing, setIsEditing] = useState(false);
+            const [text, setText] = useState(card.text);
+
+            useEffect(() => {
+                setText(card.text);
+            }, [card.text]);
+
+            const handleSave = () => {
+                if (text.trim() && text.trim() !== card.text) {
+                    onUpdateText(card.id, text.trim());
+                } else {
+                    setText(card.text);
+                }
+                setIsEditing(false);
+            };
+
+            return (
+                <div 
+                    draggable={!isEditing}
+                    onDragStart={(e) => onDragStart(e, card.id)}
+                    className={`sticky-card ${card.color} p-3.5 rounded-2xl border cursor-grab active:cursor-grabbing relative group`}>
+                    
+                    {/* Author Badge */}
+                    {card.author && (
+                        <div className="mb-1.5 flex items-center justify-between">
+                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md">
+                                👤 {card.author}
+                            </span>
+                        </div>
+                    )}
+
+                    {/* Upper content / Edit mode */}
+                    {isEditing ? (
+                        <textarea
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                            onBlur={handleSave}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSave();
+                                }
+                            }}
+                            autoFocus
+                            className="w-full text-xs font-medium leading-relaxed bg-white/90 border border-indigo-400 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none h-20 mb-2"
+                        />
+                    ) : (
+                        <div className="flex justify-between items-start mb-3 gap-1">
+                            <p 
+                                onClick={() => setIsEditing(true)}
+                                title="クリックして文字を編集"
+                                className="text-xs font-medium leading-relaxed break-words cursor-pointer hover:bg-black/5 p-1 -m-1 rounded transition flex-1">
+                                {card.text}
+                            </p>
+                            <button
+                                onClick={() => setIsEditing(true)}
+                                title="編集"
+                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-700 p-0.5 text-[10px] transition shrink-0">
+                                <i className="fa-solid fa-pen"></i>
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Bottom controls */}
+                    <div className="flex items-center justify-between pt-2 border-t border-black/10 text-[11px]">
+                        <button 
+                            onClick={() => onVote(card.id)}
+                            className="flex items-center gap-1 hover:scale-110 transition active:scale-95 bg-white/60 px-2 py-0.5 rounded-full text-slate-700 font-bold hover:bg-white">
+                            <span>👍</span>
+                            <span>{card.votes}</span>
+                        </button>
+
+                        <button 
+                            onClick={() => onDelete(card.id)}
+                            className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 p-1 transition">
+                            <i className="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
