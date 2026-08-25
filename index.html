@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.3.1)</title>
+    <title>板書・意見整理 AI (v1.3.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -24,6 +24,8 @@
         body {
             font-family: 'Zen Maru Gothic', sans-serif;
             background-color: #f3f4f6;
+            height: 100dvh;
+            min-height: 100dvh;
         }
         .sticky-card {
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -45,13 +47,13 @@
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
-<body class="h-screen overflow-hidden flex flex-col bg-slate-100 text-slate-800">
+<body class="h-[100dvh] min-h-[100dvh] overflow-hidden flex flex-col bg-slate-100 text-slate-800">
     <div id="root" class="h-full w-full"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.3.1";
+        const APP_VERSION = "v1.3.2";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -633,9 +635,9 @@
                     </header>
 
                     {appRole === 'participant' ? (
-                        /* Participant View (スマホ最適化・タブ切り替え対応) */
-                        <div className="flex-1 bg-slate-900 p-2.5 sm:p-4 overflow-y-auto flex flex-col items-center">
-                            <div className="max-w-md w-full space-y-2.5 my-auto flex flex-col h-full max-h-full">
+                        /* Participant View (スマホ最適化・確実表示レイアウト) */
+                        <div className="flex-1 bg-slate-900 p-2 sm:p-4 overflow-hidden flex flex-col items-center justify-start h-full min-h-0">
+                            <div className="max-w-md w-full flex flex-col h-full min-h-0 gap-2">
                                 
                                 {/* タブ切り替えバー */}
                                 <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1 shrink-0 shadow-md">
@@ -656,10 +658,10 @@
 
                                 {participantTab === 'post' ? (
                                     /* 📝 投稿・履歴タブ（上: 投稿履歴 / 下: 投稿フォーム） */
-                                    <div className="space-y-2.5 flex-1 flex flex-col min-h-0">
-                                        {/* 📜 上部：あなたの投稿履歴セクション（スクロール可能） */}
-                                        <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0">
-                                            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/80 shrink-0">
+                                    <div className="flex flex-col flex-1 min-h-0 gap-2">
+                                        {/* 📜 上部：あなたの投稿履歴セクション（伸縮・スクロール可能） */}
+                                        <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 min-h-0 flex flex-col overflow-hidden">
+                                            <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700/80 shrink-0">
                                                 <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
                                                     <i className="fa-solid fa-clock-rotate-left text-amber-400 text-[11px]"></i>
                                                     あなたの投稿履歴
@@ -677,7 +679,7 @@
                                             </div>
 
                                             {myHistory.length === 0 ? (
-                                                <div className="text-center py-6 border border-dashed border-slate-700 rounded-xl my-auto">
+                                                <div className="text-center py-4 border border-dashed border-slate-700 rounded-xl my-auto">
                                                     <p className="text-[11px] text-slate-400 font-medium">まだ投稿した意見はありません</p>
                                                     <p className="text-[10px] text-slate-500 mt-0.5">下のフォームから意見を送信してみましょう！</p>
                                                 </div>
@@ -722,8 +724,8 @@
                                             )}
                                         </div>
 
-                                        {/* 📝 下部：投稿フォームカード */}
-                                        <div className="bg-white rounded-2xl p-3.5 shadow-xl border border-slate-100 shrink-0">
+                                        {/* 📝 下部：投稿フォームカード（常時画面内に固定） */}
+                                        <div className="bg-white rounded-2xl p-3 shadow-2xl border border-slate-100 shrink-0">
                                             <form onSubmit={handleAddCard} className="space-y-2">
                                                 {/* 名前 & カラー選択（1行に集約） */}
                                                 <div className="flex items-center gap-2">
@@ -768,14 +770,14 @@
                                                 {/* 送信ボタン */}
                                                 <button
                                                     type="submit"
-                                                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 text-xs">
+                                                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold py-2.5 rounded-xl shadow-md transition flex items-center justify-center gap-1.5 text-xs cursor-pointer">
                                                     <i className="fa-solid fa-paper-plane"></i> 意見を送信する
                                                 </button>
                                             </form>
 
                                             {/* 講師画面から切り替えたときのみ戻るリンクを表示 */}
                                             {!isParticipantOnly && (
-                                                <div className="mt-2 pt-2 border-t border-slate-100 text-center">
+                                                <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-center">
                                                     <button 
                                                         onClick={() => setAppRole('board')}
                                                         className="text-[11px] text-indigo-600 hover:underline font-bold">
