@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.2.4)</title>
+    <title>板書・意見整理 AI (v1.3.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -51,7 +51,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.2.4";
+        const APP_VERSION = "v1.3.0";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -60,10 +60,10 @@
         ];
 
         const INITIAL_CARDS = [
-            { id: 'c-1', text: 'スマホから誰でもすぐに意見を投稿できるようにしたい', color: 'sticky-yellow', categoryId: null, votes: 4, author: '受講者A' },
-            { id: 'c-2', text: '研修中のグループワークでの発言を可視化したい', color: 'sticky-blue', categoryId: null, votes: 2, author: '受講者B' },
-            { id: 'c-3', text: '意見が多くなりすぎた時に分類に時間がかかる', color: 'sticky-pink', categoryId: null, votes: 5, author: '受講者C' },
-            { id: 'c-4', text: 'AIが要約まで作ってくれるとレポート作成が楽になる', color: 'sticky-green', categoryId: null, votes: 3, author: '受講者D' }
+            { id: 'c-1', text: 'スマホから誰でもすぐに意見を投稿できるようにしたい', color: 'sticky-yellow', categoryId: null, votes: 4, author: '受講者A', createdAt: '16:10' },
+            { id: 'c-2', text: '研修中のグループワークでの発言を可視化したい', color: 'sticky-blue', categoryId: null, votes: 2, author: '受講者B', createdAt: '16:12' },
+            { id: 'c-3', text: '意見が多くなりすぎた時に分類に時間がかかる', color: 'sticky-pink', categoryId: null, votes: 5, author: '受講者C', createdAt: '16:15' },
+            { id: 'c-4', text: 'AIが要約まで作ってくれるとレポート作成が楽になる', color: 'sticky-green', categoryId: null, votes: 3, author: '受講者D', createdAt: '16:18' }
         ];
 
         function App() {
@@ -88,6 +88,17 @@
                 return saved ? JSON.parse(saved) : [];
             });
 
+            // 自分のいいね投票記録 ({ cardId: true })
+            const [myVotes, setMyVotes] = useState(() => {
+                const saved = localStorage.getItem('bansho_my_votes');
+                return saved ? JSON.parse(saved) : {};
+            });
+
+            // 参加者画面のタブ ('post' | 'timeline')
+            const [participantTab, setParticipantTab] = useState('post');
+            // タイムラインの並び順 ('latest' | 'votes')
+            const [timelineSort, setTimelineSort] = useState('latest');
+
             const [participantName, setParticipantName] = useState(() => {
                 return localStorage.getItem('bansho_my_name') || '';
             });
@@ -108,10 +119,20 @@
 
             const peerRef = useRef(null);
             const connRef = useRef(null);
+            const hostConnsRef = useRef([]); // 講師ボード接続クライアント一覧
 
             const showToast = (msg) => {
                 setToastMessage(msg);
                 setTimeout(() => setToastMessage(null), 3000);
+            };
+
+            // ホストから全参加者へのブロードキャスト関数
+            const broadcastToClients = (msg) => {
+                hostConnsRef.current.forEach(c => {
+                    if (c && c.open) {
+                        try { c.send(msg); } catch (e) { console.warn('Broadcast error:', e); }
+                    }
+                });
             };
 
             // PeerJSによるリアルタイムP2P同期設定
@@ -134,16 +155,42 @@
                     if (appRole === 'board') {
                         peer.on('connection', (conn) => {
                             console.log('Host received new connection from:', conn.peer);
+                            hostConnsRef.current.push(conn);
+
+                            conn.on('open', () => {
+                                // 接続した参加者に最新の全カード一覧を同期送信
+                                conn.send({ type: 'SYNC_CARDS', cards });
+                            });
+
+                            conn.on('close', () => {
+                                hostConnsRef.current = hostConnsRef.current.filter(c => c !== conn);
+                            });
+
                             conn.on('data', (data) => {
                                 console.log('Host received data:', data);
                                 if (!data) return;
                                 if (data.type === 'NEW_CARD') {
-                                    setCards(prev => [data.card, ...prev]);
+                                    setCards(prev => {
+                                        const next = [data.card, ...prev];
+                                        broadcastToClients({ type: 'SYNC_CARDS', cards: next });
+                                        return next;
+                                    });
                                     showToast(`📩 ${data.card.author || '受講者'}から意見が届きました！`);
                                 } else if (data.type === 'DELETE_CARD') {
-                                    // 参加者による送信取り消しをボードに即時反映
-                                    setCards(prev => prev.filter(c => c.id !== data.cardId));
+                                    setCards(prev => {
+                                        const next = prev.filter(c => c.id !== data.cardId);
+                                        broadcastToClients({ type: 'SYNC_CARDS', cards: next });
+                                        return next;
+                                    });
                                     showToast(`🗑️ ${data.author || '受講者'}が意見の送信を取り消しました`);
+                                } else if (data.type === 'VOTE_CARD') {
+                                    setCards(prev => {
+                                        const next = prev.map(c => c.id === data.cardId ? { ...c, votes: Math.max(0, (c.votes || 0) + (data.delta || 1)) } : c);
+                                        broadcastToClients({ type: 'SYNC_CARDS', cards: next });
+                                        return next;
+                                    });
+                                } else if (data.type === 'REQUEST_SYNC') {
+                                    conn.send({ type: 'SYNC_CARDS', cards });
                                 }
                             });
                         });
@@ -157,7 +204,7 @@
                 };
             }, [appRole]);
 
-            // ホスト接続関数
+            // ホスト接続関数（参加者側）
             const connectToHost = (peerInstance) => {
                 const p = peerInstance || peerRef.current;
                 if (!p || p.destroyed) return;
@@ -167,6 +214,12 @@
                     conn.on('open', () => {
                         console.log('Connected to host:', roomHostId);
                         setPeerConnected(true);
+                        conn.send({ type: 'REQUEST_SYNC' });
+                    });
+                    conn.on('data', (data) => {
+                        if (data && data.type === 'SYNC_CARDS') {
+                            setCards(data.cards);
+                        }
                     });
                     conn.on('close', () => {
                         console.log('Connection to host closed');
@@ -210,6 +263,11 @@
                             console.log('Payload sent after reconnect:', payload);
                             if (onComplete) onComplete();
                         });
+                        conn.on('data', (data) => {
+                            if (data && data.type === 'SYNC_CARDS') {
+                                setCards(data.cards);
+                            }
+                        });
                         conn.on('close', () => setPeerConnected(false));
                     } catch (err) {
                         console.error('Reconnect and send failed:', err);
@@ -218,6 +276,53 @@
                 } else {
                     if (onComplete) onComplete();
                 }
+            };
+
+            // LocalStorage Auto-Save
+            useEffect(() => {
+                localStorage.setItem('bansho_categories', JSON.stringify(categories));
+            }, [categories]);
+
+            useEffect(() => {
+                localStorage.setItem('bansho_cards', JSON.stringify(cards));
+                if (appRole === 'board') {
+                    broadcastToClients({ type: 'SYNC_CARDS', cards });
+                }
+            }, [cards, appRole]);
+
+            useEffect(() => {
+                localStorage.setItem('bansho_my_history', JSON.stringify(myHistory));
+            }, [myHistory]);
+
+            useEffect(() => {
+                localStorage.setItem('bansho_my_votes', JSON.stringify(myVotes));
+            }, [myVotes]);
+
+            useEffect(() => {
+                localStorage.setItem('bansho_my_name', participantName);
+            }, [participantName]);
+
+            // いいね投票切り替え（参加者側）
+            const handleToggleVote = (cardId) => {
+                const hasVoted = !!myVotes[cardId];
+                const delta = hasVoted ? -1 : 1;
+
+                // 自分の投票状態を更新
+                const updatedVotes = { ...myVotes };
+                if (hasVoted) {
+                    delete updatedVotes[cardId];
+                    showToast('いいねを取り消しました');
+                } else {
+                    updatedVotes[cardId] = true;
+                    showToast('👍 いいねしました！');
+                }
+                setMyVotes(updatedVotes);
+
+                // 手元のカード表示も即時反映
+                setCards(prev => prev.map(c => c.id === cardId ? { ...c, votes: Math.max(0, (c.votes || 0) + delta) } : c));
+
+                // 講師ボードへシグナル送信（P2P）
+                sendP2pMessage({ type: 'VOTE_CARD', cardId, delta });
             };
 
             // LocalStorage Auto-Save
@@ -528,136 +633,253 @@
                     </header>
 
                     {appRole === 'participant' ? (
-                        /* Participant View (スマホ最適化・省スペース) */
+                        /* Participant View (スマホ最適化・タブ切り替え対応) */
                         <div className="flex-1 bg-slate-900 p-2.5 sm:p-4 overflow-y-auto flex flex-col items-center">
-                            <div className="max-w-md w-full space-y-2.5 my-auto">
-                                {/* 投稿フォームカード */}
-                                <div className="bg-white rounded-2xl p-3.5 shadow-xl border border-slate-100">
-                                    <form onSubmit={handleAddCard} className="space-y-2">
-                                        {/* 名前 & カラー選択（1行に集約） */}
-                                        <div className="flex items-center gap-2">
-                                            <input 
-                                                type="text"
-                                                value={participantName}
-                                                onChange={(e) => setParticipantName(e.target.value)}
-                                                placeholder="名前 (任意)"
-                                                className="w-28 sm:w-32 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none shrink-0"
-                                            />
-                                            <div className="flex-1 flex items-center space-x-1 bg-slate-100 p-1 rounded-lg">
-                                                {[
-                                                    { id: 'sticky-yellow', bg: 'bg-yellow-300' },
-                                                    { id: 'sticky-green', bg: 'bg-emerald-300' },
-                                                    { id: 'sticky-blue', bg: 'bg-sky-300' },
-                                                    { id: 'sticky-pink', bg: 'bg-pink-300' },
-                                                    { id: 'sticky-purple', bg: 'bg-purple-300' }
-                                                ].map(color => (
-                                                    <button
-                                                        key={color.id}
-                                                        type="button"
-                                                        onClick={() => setSelectedColor(color.id)}
-                                                        className={`flex-1 h-6 rounded ${color.bg} flex items-center justify-center font-bold text-[10px] transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60 hover:opacity-100'}`}>
-                                                        {selectedColor === color.id && '✓'}
+                            <div className="max-w-md w-full space-y-2.5 my-auto flex flex-col h-full max-h-full">
+                                
+                                {/* タブ切り替えバー */}
+                                <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1 shrink-0 shadow-md">
+                                    <button 
+                                        onClick={() => setParticipantTab('post')}
+                                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${participantTab === 'post' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                        <i className="fa-solid fa-pen-to-square"></i> 投稿・履歴
+                                    </button>
+                                    <button 
+                                        onClick={() => setParticipantTab('timeline')}
+                                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${participantTab === 'timeline' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                        <i className="fa-solid fa-comments"></i> みんなの意見
+                                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${participantTab === 'timeline' ? 'bg-white text-indigo-700' : 'bg-slate-700 text-slate-300'}`}>
+                                            {cards.length}
+                                        </span>
+                                    </button>
+                                </div>
+
+                                {participantTab === 'post' ? (
+                                    /* 📝 投稿 & 自分の履歴タブ */
+                                    <div className="space-y-2.5 flex-1 flex flex-col min-h-0">
+                                        {/* 投稿フォームカード */}
+                                        <div className="bg-white rounded-2xl p-3.5 shadow-xl border border-slate-100 shrink-0">
+                                            <form onSubmit={handleAddCard} className="space-y-2">
+                                                {/* 名前 & カラー選択（1行に集約） */}
+                                                <div className="flex items-center gap-2">
+                                                    <input 
+                                                        type="text"
+                                                        value={participantName}
+                                                        onChange={(e) => setParticipantName(e.target.value)}
+                                                        placeholder="名前 (任意)"
+                                                        className="w-28 sm:w-32 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none shrink-0"
+                                                    />
+                                                    <div className="flex-1 flex items-center space-x-1 bg-slate-100 p-1 rounded-lg">
+                                                        {[
+                                                            { id: 'sticky-yellow', bg: 'bg-yellow-300' },
+                                                            { id: 'sticky-green', bg: 'bg-emerald-300' },
+                                                            { id: 'sticky-blue', bg: 'bg-sky-300' },
+                                                            { id: 'sticky-pink', bg: 'bg-pink-300' },
+                                                            { id: 'sticky-purple', bg: 'bg-purple-300' }
+                                                        ].map(color => (
+                                                            <button
+                                                                key={color.id}
+                                                                type="button"
+                                                                onClick={() => setSelectedColor(color.id)}
+                                                                className={`flex-1 h-6 rounded ${color.bg} flex items-center justify-center font-bold text-[10px] transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60 hover:opacity-100'}`}>
+                                                                {selectedColor === color.id && '✓'}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* 意見入力テキストエリア */}
+                                                <div>
+                                                    <textarea
+                                                        value={inputText}
+                                                        onChange={(e) => setInputText(e.target.value)}
+                                                        rows="2"
+                                                        placeholder="意見・アイデアを入力..."
+                                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-normal resize-none"
+                                                        required
+                                                    ></textarea>
+                                                </div>
+
+                                                {/* 送信ボタン */}
+                                                <button
+                                                    type="submit"
+                                                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 text-xs">
+                                                    <i className="fa-solid fa-paper-plane"></i> 意見を送信する
+                                                </button>
+                                            </form>
+
+                                            {/* 講師画面から切り替えたときのみ戻るリンクを表示 */}
+                                            {!isParticipantOnly && (
+                                                <div className="mt-2 pt-2 border-t border-slate-100 text-center">
+                                                    <button 
+                                                        onClick={() => setAppRole('board')}
+                                                        className="text-[11px] text-indigo-600 hover:underline font-bold">
+                                                        ← 講師用メインボード表示に戻る
                                                     </button>
-                                                ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* 📜 自分の投稿履歴セクション */}
+                                        <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0">
+                                            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/80 shrink-0">
+                                                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-clock-rotate-left text-amber-400 text-[11px]"></i>
+                                                    あなたの投稿履歴
+                                                    <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                                                        {myHistory.length} 件
+                                                    </span>
+                                                </h3>
+                                                {myHistory.length > 0 && (
+                                                    <button 
+                                                        onClick={handleClearHistory}
+                                                        className="text-[10px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
+                                                        <i className="fa-solid fa-trash-can text-[9px]"></i> 履歴消去
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {myHistory.length === 0 ? (
+                                                <div className="text-center py-4 border border-dashed border-slate-700 rounded-xl my-auto">
+                                                    <p className="text-[11px] text-slate-400 font-medium">まだ投稿した意見はありません</p>
+                                                    <p className="text-[10px] text-slate-500">送信した意見はここに一覧として保存されます</p>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-1.5 flex-1 overflow-y-auto pr-1">
+                                                    {myHistory.map((item) => (
+                                                        <div 
+                                                            key={item.id} 
+                                                            className={`${item.color} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
+                                                            <div className="flex items-center justify-between gap-1.5 mb-1">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className="text-[9px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded">
+                                                                        {item.author || '受講者'}
+                                                                    </span>
+                                                                    {item.createdAt && (
+                                                                        <span className="text-[9px] text-black/60 font-mono">
+                                                                            🕒 {item.createdAt}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <button 
+                                                                        onClick={() => handleReuseHistory(item)}
+                                                                        title="この内容をもう一度入力欄にセット"
+                                                                        className="text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 shadow-2xs">
+                                                                        <i className="fa-solid fa-arrow-rotate-left text-[8px]"></i> 再利用
+                                                                    </button>
+                                                                    <button 
+                                                                        onClick={() => handleCancelSend(item)}
+                                                                        title="この意見の送信を取り消す（講師ボードからも削除）"
+                                                                        className="text-rose-700 hover:text-white bg-rose-500/15 hover:bg-rose-600 px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 border border-rose-400/30">
+                                                                        <i className="fa-solid fa-trash-can text-[8px]"></i> 取消
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <p className="text-xs font-medium leading-snug break-words text-slate-800">
+                                                                {item.text}
+                                                            </p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* 💬 みんなの意見タイムラインタブ */
+                                    <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0">
+                                        {/* 上部コントロールバー（ソート切り替え & 件数） */}
+                                        <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/80 shrink-0">
+                                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                <i className="fa-solid fa-comments text-indigo-400 text-[11px]"></i>
+                                                全 {cards.length} 件の意見
+                                            </span>
+                                            <div className="flex items-center space-x-1 bg-slate-900/80 p-0.5 rounded-lg border border-slate-700">
+                                                <button
+                                                    onClick={() => setTimelineSort('latest')}
+                                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1 ${timelineSort === 'latest' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                                    <i className="fa-solid fa-clock text-[9px]"></i> 新着順
+                                                </button>
+                                                <button
+                                                    onClick={() => setTimelineSort('votes')}
+                                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1 ${timelineSort === 'votes' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                                    <i className="fa-solid fa-fire text-[9px]"></i> 人気順
+                                                </button>
                                             </div>
                                         </div>
 
-                                        {/* 意見入力テキストエリア */}
-                                        <div>
-                                            <textarea
-                                                value={inputText}
-                                                onChange={(e) => setInputText(e.target.value)}
-                                                rows="2"
-                                                placeholder="意見・アイデアを入力..."
-                                                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-normal resize-none"
-                                                required
-                                            ></textarea>
-                                        </div>
+                                        {/* カード一覧リスト */}
+                                        {cards.length === 0 ? (
+                                            <div className="text-center py-8 border border-dashed border-slate-700 rounded-xl my-auto">
+                                                <i className="fa-solid fa-inbox text-2xl text-slate-600 mb-2"></i>
+                                                <p className="text-[11px] text-slate-400 font-medium">まだ意見が投稿されていません</p>
+                                                <p className="text-[10px] text-slate-500 mt-0.5">「投稿・履歴」タブから最初の意見を投稿してみましょう！</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2 flex-1 overflow-y-auto pr-1">
+                                                {[...cards]
+                                                    .sort((a, b) => {
+                                                        if (timelineSort === 'votes') {
+                                                            return (b.votes || 0) - (a.votes || 0);
+                                                        }
+                                                        return 0; // 新着順（配列順）
+                                                    })
+                                                    .map(card => {
+                                                        const isMyCard = myHistory.some(h => h.id === card.id);
+                                                        const isVoted = !!myVotes[card.id];
+                                                        const cat = categories.find(c => c.id === card.categoryId);
 
-                                        {/* 送信ボタン */}
-                                        <button
-                                            type="submit"
-                                            className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 text-xs">
-                                            <i className="fa-solid fa-paper-plane"></i> 意見を送信する
-                                        </button>
-                                    </form>
+                                                        return (
+                                                            <div 
+                                                                key={card.id} 
+                                                                className={`${card.color} p-2.5 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
+                                                                
+                                                                {/* 上段ヘッダー（名前・時間・カテゴリ） */}
+                                                                <div className="flex items-center justify-between gap-1.5 mb-1">
+                                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                                        <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                                                            <span>👤 {card.author || '受講者'}</span>
+                                                                            {isMyCard && (
+                                                                                <span className="bg-indigo-600 text-white text-[8px] px-1 rounded font-bold">あなた</span>
+                                                                            )}
+                                                                        </span>
+                                                                        {card.createdAt && (
+                                                                            <span className="text-[9px] text-black/60 font-mono">
+                                                                                🕒 {card.createdAt}
+                                                                            </span>
+                                                                        )}
+                                                                        {cat && (
+                                                                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-white">
+                                                                                {cat.title}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
 
-                                    {/* 講師画面から切り替えたときのみ戻るリンクを表示 */}
-                                    {!isParticipantOnly && (
-                                        <div className="mt-2 pt-2 border-t border-slate-100 text-center">
-                                            <button 
-                                                onClick={() => setAppRole('board')}
-                                                className="text-[11px] text-indigo-600 hover:underline font-bold">
-                                                ← 講師用メインボード表示に戻る
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
+                                                                {/* 本文 */}
+                                                                <p className="text-xs font-medium leading-relaxed break-words text-slate-800 mb-2">
+                                                                    {card.text}
+                                                                </p>
 
-                                {/* 📜 自分の投稿履歴セクション */}
-                                <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm">
-                                    <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/80">
-                                        <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                                            <i className="fa-solid fa-clock-rotate-left text-amber-400 text-[11px]"></i>
-                                            あなたの投稿履歴
-                                            <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                                                {myHistory.length} 件
-                                            </span>
-                                        </h3>
-                                        {myHistory.length > 0 && (
-                                            <button 
-                                                onClick={handleClearHistory}
-                                                className="text-[10px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
-                                                <i className="fa-solid fa-trash-can text-[9px]"></i> 履歴消去
-                                            </button>
+                                                                {/* 下段：いいねボタン */}
+                                                                <div className="flex items-center justify-end pt-1 border-t border-black/10">
+                                                                    <button
+                                                                        onClick={() => handleToggleVote(card.id)}
+                                                                        title={isVoted ? "いいねを取り消す" : "この意見にいいね！"}
+                                                                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition active:scale-95 shadow-xs ${isVoted ? 'bg-indigo-600 text-white ring-2 ring-indigo-400/50' : 'bg-white/80 hover:bg-white text-slate-800 hover:text-indigo-600'}`}>
+                                                                        <span>{isVoted ? '❤️' : '👍'}</span>
+                                                                        <span>{card.votes || 0}</span>
+                                                                        <span className="text-[10px] font-normal opacity-80">{isVoted ? '投票済' : 'いいね'}</span>
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })
+                                                }
+                                            </div>
                                         )}
                                     </div>
-
-                                    {myHistory.length === 0 ? (
-                                        <div className="text-center py-4 border border-dashed border-slate-700 rounded-xl">
-                                            <p className="text-[11px] text-slate-400 font-medium">まだ投稿した意見はありません</p>
-                                            <p className="text-[10px] text-slate-500">送信した意見はここに一覧として保存されます</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-1.5 max-h-[52vh] overflow-y-auto pr-1">
-                                            {myHistory.map((item) => (
-                                                <div 
-                                                    key={item.id} 
-                                                    className={`${item.color} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
-                                                    <div className="flex items-center justify-between gap-1.5 mb-1">
-                                                        <div className="flex items-center gap-1.5">
-                                                            <span className="text-[9px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded">
-                                                                {item.author || '受講者'}
-                                                            </span>
-                                                            {item.createdAt && (
-                                                                <span className="text-[9px] text-black/60 font-mono">
-                                                                    🕒 {item.createdAt}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <button 
-                                                                onClick={() => handleReuseHistory(item)}
-                                                                title="この内容をもう一度入力欄にセット"
-                                                                className="text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 shadow-2xs">
-                                                                <i className="fa-solid fa-arrow-rotate-left text-[8px]"></i> 再利用
-                                                            </button>
-                                                            <button 
-                                                                onClick={() => handleCancelSend(item)}
-                                                                title="この意見の送信を取り消す（講師ボードからも削除）"
-                                                                className="text-rose-700 hover:text-white bg-rose-500/15 hover:bg-rose-600 px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 border border-rose-400/30">
-                                                                <i className="fa-solid fa-trash-can text-[8px]"></i> 取消
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                    <p className="text-xs font-medium leading-snug break-words text-slate-800">
-                                                        {item.text}
-                                                    </p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
+                                )}
                             </div>
                         </div>
                     ) : (
