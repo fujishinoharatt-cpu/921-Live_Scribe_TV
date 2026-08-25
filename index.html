@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.5.1)</title>
+    <title>板書・意見整理 AI (v1.5.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -53,7 +53,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.5.1";
+        const APP_VERSION = "v1.5.2";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -636,14 +636,49 @@
                 showToast('APIキーを削除しました');
             };
 
-            // Gemini API 呼び出しヘルパー（最新gemini-3.6-flash優先＋自動フォールバック）
+            // Gemini API 呼び出しヘルパー（動的モデル検出 ＋ 優先候補フォールバック）
             const callGeminiApi = async (key, bodyPayload) => {
-                const candidateModels = [
+                let candidateModels = [
+                    'gemini-3.6-flash-lite',
                     'gemini-3.6-flash',
+                    'gemini-2.5-flash-lite',
                     'gemini-2.5-flash',
                     'gemini-2.0-flash',
-                    'gemini-1.5-flash'
+                    'gemini-2.0-flash-lite',
+                    'gemini-1.5-flash',
+                    'gemini-1.5-flash-8b',
+                    'gemini-1.5-pro'
                 ];
+
+                // 可能であればAPIキーに紐づく有効なモデル一覧をGoogleから直接取得して最優先化
+                try {
+                    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+                    if (listRes.ok) {
+                        const listData = await listRes.json();
+                        if (listData.models && Array.isArray(listData.models)) {
+                            const availableModels = listData.models
+                                .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+                                .map(m => m.name.replace('models/', ''));
+                            
+                            // flash系・lite系を優先してソート
+                            const sorted = availableModels.sort((a, b) => {
+                                const score = (name) => {
+                                    if (name.includes('flash-lite')) return 10;
+                                    if (name.includes('flash')) return 8;
+                                    if (name.includes('gemini')) return 5;
+                                    return 1;
+                                };
+                                return score(b) - score(a);
+                            });
+
+                            if (sorted.length > 0) {
+                                candidateModels = [...new Set([...sorted, ...candidateModels])];
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log('Dynamic model list notice:', e);
+                }
 
                 let lastError = null;
                 for (const model of candidateModels) {
@@ -664,7 +699,7 @@
                         lastError = e;
                     }
                 }
-                throw lastError || new Error('Gemini API呼び出しに失敗しました');
+                throw lastError || new Error('利用可能なGeminiモデルが見つかりませんでした');
             };
 
             // APIキーテスト接続
