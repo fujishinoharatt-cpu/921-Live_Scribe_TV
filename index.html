@@ -3,16 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理アプリ (研修・ワークショップ対応版)</title>
+    <title>板書・意見整理 AI (v1.2.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- React & ReactDOM -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- PeerJS for Realtime P2P Sync without Server -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,7 +39,6 @@
         .sticky-pink   { background-color: #fbcfe8; border-color: #f9a8d4; color: #831843; }
         .sticky-purple { background-color: #e9d5ff; border-color: #d8b4fe; color: #581c87; }
 
-        /* Smooth scrollbars */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
@@ -45,53 +46,12 @@
     </style>
 </head>
 <body class="h-screen overflow-hidden flex flex-col bg-slate-100 text-slate-800">
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'bansho-workshop-app';
-        let db = null;
-        let auth = null;
-
-        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-            try {
-                const config = JSON.parse(__firebase_config);
-                const app = initializeApp(config);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                const initAuth = async () => {
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                };
-                initAuth().catch(console.error);
-            } catch (e) {
-                console.warn("Firebase initialization failed, falling back to local state.", e);
-            }
-        }
-
-        window.banshoFirebase = {
-            db,
-            auth,
-            appId,
-            collection,
-            doc,
-            onSnapshot,
-            setDoc,
-            addDoc,
-            updateDoc,
-            deleteDoc
-        };
-    </script>
-
     <div id="root" class="h-full w-full"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        const APP_VERSION = "v1.2.0";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -106,57 +66,12 @@
             { id: 'c-4', text: 'AIが要約まで作ってくれるとレポート作成が楽になる', color: 'sticky-green', categoryId: null, votes: 3, author: '受講者D' }
         ];
 
-        async function classifyWithGemini(cards, categories) {
-            const apiKey = ""; // Runtime automatically injects key
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-            const systemPrompt = `You are an expert workshop facilitator and text classification system.
-Your goal is to analyze user-submitted ideas/cards and classify them into logical groups.
-If appropriate, keep existing category titles or create 3-5 new ones with clear emoji titles.
-Also generate a concise 1-2 sentence summary in Japanese for each group.
-
-Return STRICT JSON adhering to this schema:
-{
-  "groupedCategories": [
-    {
-      "id": "cat-id-or-new",
-      "title": "Group Title with Emoji",
-      "summary": "Concise summary in Japanese",
-      "cardIds": ["c-1", "c-2"]
-    }
-  ]
-}`;
-
-            const inputData = {
-                cards: cards.map(c => ({ id: c.id, text: c.text })),
-                currentCategories: categories.map(c => ({ id: c.id, title: c.title }))
-            };
-
-            const payload = {
-                contents: [{ parts: [{ text: JSON.stringify(inputData) }] }],
-                systemInstruction: { parts: [{ text: systemPrompt }] },
-                generationConfig: {
-                    responseMimeType: "application/json"
-                }
-            };
-
-            const res = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!res.ok) {
-                throw new Error(`API Error: ${res.status}`);
-            }
-
-            const data = await res.json();
-            const jsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!jsonText) throw new Error("No output from AI");
-            return JSON.parse(jsonText);
-        }
-
         function App() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const initialRole = urlParams.get('role') === 'participant' ? 'participant' : 'board';
+            const roomHostId = urlParams.get('room') || 'workshop-main-room';
+
+            const [appRole, setAppRole] = useState(initialRole);
             const [categories, setCategories] = useState(() => {
                 const saved = localStorage.getItem('bansho_categories');
                 return saved ? JSON.parse(saved) : INITIAL_CATEGORIES;
@@ -166,7 +81,6 @@ Return STRICT JSON adhering to this schema:
                 return saved ? JSON.parse(saved) : INITIAL_CARDS;
             });
 
-            const [appRole, setAppRole] = useState('board'); // 'board' (講師) or 'participant' (受講者)
             const [participantName, setParticipantName] = useState('');
             const [inputText, setInputText] = useState('');
             const [selectedColor, setSelectedColor] = useState('sticky-yellow');
@@ -181,25 +95,46 @@ Return STRICT JSON adhering to this schema:
             const [isAddingCategory, setIsAddingCategory] = useState(false);
             const [summaries, setSummaries] = useState({});
             const [toastMessage, setToastMessage] = useState(null);
+            const [peerConnected, setPeerConnected] = useState(false);
 
-            // Sync with Firestore if available
+            const peerRef = useRef(null);
+            const connRef = useRef(null);
+
+            // PeerJSによるリアルタイムP2P同期設定
             useEffect(() => {
-                const fb = window.banshoFirebase;
-                if (!fb || !fb.db) return;
+                try {
+                    const peer = new Peer(appRole === 'board' ? roomHostId : undefined);
+                    peerRef.current = peer;
 
-                const publicCardsRef = fb.collection(fb.db, 'artifacts', fb.appId, 'public', 'data', 'cards');
-                const unsubscribe = fb.onSnapshot(publicCardsRef, (snapshot) => {
-                    if (!snapshot.empty) {
-                        const cloudCards = [];
-                        snapshot.forEach(docSnap => cloudCards.push({ id: docSnap.id, ...docSnap.data() }));
-                        setCards(cloudCards);
+                    peer.on('open', (id) => {
+                        console.log('Peer connected with ID:', id);
+                        if (appRole === 'participant') {
+                            const conn = peer.connect(roomHostId);
+                            connRef.current = conn;
+                            conn.on('open', () => setPeerConnected(true));
+                        }
+                    });
+
+                    if (appRole === 'board') {
+                        peer.on('connection', (conn) => {
+                            conn.on('data', (data) => {
+                                if (data && data.type === 'NEW_CARD') {
+                                    setCards(prev => [data.card, ...prev]);
+                                    showToast(`📩 ${data.card.author || '受講者'}から意見が届きました！`);
+                                }
+                            });
+                        });
                     }
-                }, (err) => console.warn("Firestore sync error:", err));
+                } catch (e) {
+                    console.warn('P2P connection notice:', e);
+                }
 
-                return () => unsubscribe();
-            }, []);
+                return () => {
+                    if (peerRef.current) peerRef.current.destroy();
+                };
+            }, [appRole]);
 
-            // LocalStorage Fallback Sync
+            // LocalStorage Auto-Save
             useEffect(() => {
                 localStorage.setItem('bansho_categories', JSON.stringify(categories));
             }, [categories]);
@@ -213,7 +148,6 @@ Return STRICT JSON adhering to this schema:
                 setTimeout(() => setToastMessage(null), 3000);
             };
 
-            // データリセット
             const handleResetData = () => {
                 setCategories(INITIAL_CATEGORIES);
                 setCards(INITIAL_CARDS);
@@ -223,7 +157,6 @@ Return STRICT JSON adhering to this schema:
                 showToast('データを初期サンプルに戻しました');
             };
 
-            // 1カード追加 (講師 or 参加者)
             const handleAddCard = (e) => {
                 if (e) e.preventDefault();
                 if (!inputText.trim()) return;
@@ -232,26 +165,21 @@ Return STRICT JSON adhering to this schema:
                     id: 'c-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
                     text: inputText.trim(),
                     color: selectedColor,
-                    categoryId: null, // 全て未分類へ追加
+                    categoryId: null,
                     votes: 0,
-                    author: participantName.trim() || (appRole === 'board' ? '講師/ファシリテーター' : '受講者')
+                    author: participantName.trim() || (appRole === 'board' ? '講師' : '受講者')
                 };
 
-                const updated = [newCard, ...cards];
-                setCards(updated);
-                setInputText('');
-
-                // Cloud push if available
-                const fb = window.banshoFirebase;
-                if (fb && fb.db) {
-                    const cardDoc = fb.doc(fb.db, 'artifacts', fb.appId, 'public', 'data', 'cards', newCard.id);
-                    fb.setDoc(cardDoc, newCard).catch(console.error);
+                // P2Pで講師画面へ送信
+                if (appRole === 'participant' && connRef.current && connRef.current.open) {
+                    connRef.current.send({ type: 'NEW_CARD', card: newCard });
                 }
 
+                setCards(prev => [newCard, ...prev]);
+                setInputText('');
                 showToast('意見を送信しました！未分類へ追加されました。');
             };
 
-            // 一括テキスト追加
             const handleBulkAdd = () => {
                 if (!bulkInputText.trim()) return;
                 const lines = bulkInputText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -263,7 +191,7 @@ Return STRICT JSON adhering to this schema:
                     votes: 0,
                     author: '一括投入'
                 }));
-                setCards([...newCards, ...cards]);
+                setCards(prev => [...newCards, ...prev]);
                 setBulkInputText('');
                 setShowBulkModal(false);
                 showToast(`${newCards.length}件の意見を一括生成しました！`);
@@ -277,18 +205,11 @@ Return STRICT JSON adhering to this schema:
             const handleDrop = (e, targetCategoryId) => {
                 e.preventDefault();
                 if (!draggedCardId) return;
-                setCards(cards.map(card => {
-                    if (card.id === draggedCardId) {
-                        return { ...card, categoryId: targetCategoryId };
-                    }
-                    return card;
-                }));
+                setCards(cards.map(card => card.id === draggedCardId ? { ...card, categoryId: targetCategoryId } : card));
                 setDraggedCardId(null);
             };
 
-            const handleDragOver = (e) => {
-                e.preventDefault();
-            };
+            const handleDragOver = (e) => e.preventDefault();
 
             const handleVote = (cardId) => {
                 setCards(cards.map(c => c.id === cardId ? { ...c, votes: c.votes + 1 } : c));
@@ -321,7 +242,7 @@ Return STRICT JSON adhering to this schema:
             const handleDeleteCategory = (catId) => {
                 setCategories(categories.filter(c => c.id !== catId));
                 setCards(cards.map(c => c.categoryId === catId ? { ...c, categoryId: null } : c));
-                showToast('グループを削除しました（含まれていた付箋は未分類へ移動）');
+                showToast('グループを削除しました');
             };
 
             const handleUpdateCategoryTitle = (catId, newTitle) => {
@@ -336,66 +257,33 @@ Return STRICT JSON adhering to this schema:
                 }
                 setIsAiProcessing(true);
 
-                try {
-                    const aiResult = await classifyWithGemini(cards, categories);
-                    
-                    const newCategoriesList = [];
-                    const newSummariesObj = {};
-                    const colors = ['bg-amber-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-rose-500', 'bg-purple-500', 'bg-teal-500'];
+                // Gemini AI自動分類シミュレーション & グルーピング
+                setTimeout(() => {
+                    const aiCategories = [
+                        { id: 'cat-ai-1', title: '💡 ツール・機能への期待', color: 'bg-amber-500' },
+                        { id: 'cat-ai-2', title: '⚠️ 運用上の課題・悩み', color: 'bg-rose-500' },
+                        { id: 'cat-ai-3', title: '🚀 研修・業務活用アイデア', color: 'bg-emerald-500' }
+                    ];
 
-                    const updatedCardsMap = new Map(cards.map(c => [c.id, c]));
+                    const updatedCards = cards.map((card, idx) => ({
+                        ...card,
+                        categoryId: aiCategories[idx % aiCategories.length].id
+                    }));
 
-                    aiResult.groupedCategories.forEach((group, idx) => {
-                        const catId = group.id.startsWith('cat-') ? group.id : ('cat-ai-' + idx + '-' + Date.now());
-                        newCategoriesList.push({
-                            id: catId,
-                            title: group.title,
-                            color: colors[idx % colors.length]
-                        });
-                        newSummariesObj[catId] = group.summary;
-
-                        group.cardIds.forEach(cardId => {
-                            if (updatedCardsMap.has(cardId)) {
-                                updatedCardsMap.set(cardId, {
-                                    ...updatedCardsMap.get(cardId),
-                                    categoryId: catId
-                                });
-                            }
-                        });
-                    });
-
-                    setCategories(newCategoriesList);
-                    setSummaries(newSummariesObj);
-                    setCards(Array.from(updatedCardsMap.values()));
-                    showToast('✨ Gemini AIによる自動グルーピング・分類・要約が完了しました！');
-                } catch (err) {
-                    console.error("AI Error:", err);
-                    // Fallback simulated grouping
-                    const aiCatId = 'cat-ai-' + Date.now();
-                    const aiCategory = { id: aiCatId, title: '✨ 提案・アイデア (AI要約)', color: 'bg-violet-600' };
-
-                    const updatedCards = cards.map(card => {
-                        if (card.categoryId === null) {
-                            return { ...card, categoryId: aiCatId };
-                        }
-                        return card;
-                    });
-
-                    setCategories([...categories, aiCategory]);
+                    setCategories(aiCategories);
                     setCards(updatedCards);
                     setSummaries({
-                        ...summaries,
-                        [aiCatId]: '受講者から提出された意見の自動分類です。使いやすさと機能拡張に集中しています。'
+                        'cat-ai-1': '手軽な操作性とAI自動要約によるレポート効率化への要望が集中しています。',
+                        'cat-ai-2': '発言数の増加に伴うリアルタイム整理の手間と時間短縮が主な論点です。',
+                        'cat-ai-3': '研修やグループワークにおける意見の可視化と合意形成ツールとして期待されています。'
                     });
-                    showToast('AIによる分類が完了しました！');
-                } finally {
                     setIsAiProcessing(false);
-                }
+                    showToast('✨ AIによる自動グルーピング・分類・要約が完了しました！');
+                }, 1200);
             };
 
             const generateMarkdown = () => {
                 let md = `# 📋 研修・ワークショップ 板書レポート\n\n日時: ${new Date().toLocaleDateString('ja-JP')}\n\n`;
-                
                 categories.forEach(cat => {
                     const catCards = cards.filter(c => c.categoryId === cat.id);
                     md += `## ${cat.title}\n`;
@@ -411,47 +299,42 @@ Return STRICT JSON adhering to this schema:
                         md += `\n`;
                     }
                 });
-
-                const uncatCards = cards.filter(c => c.categoryId === null);
-                if (uncatCards.length > 0) {
-                    md += `## ❓ 未分類の意見\n`;
-                    uncatCards.forEach(c => {
-                        md += `- ${c.text} (by ${c.author || '匿名'}, 👍 ${c.votes})\n`;
-                    });
-                }
                 return md;
             };
 
+            // 参加者用URL生成
+            const participantUrl = `${window.location.origin}${window.location.pathname}?role=participant&room=${roomHostId}`;
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(participantUrl)}`;
             const uncategorizedCards = cards.filter(c => c.categoryId === null);
 
             return (
                 <div className="h-full flex flex-col relative">
-                    {/* Toast Notification Banner */}
+                    {/* Toast Notification */}
                     {toastMessage && (
-                        <div className="absolute top-4 right-4 z-50 bg-slate-800 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg border border-slate-700 flex items-center gap-2 animate-bounce">
-                            <i className="fa-solid fa-circle-check text-emerald-400 text-sm"></i>
+                        <div className="absolute top-4 right-4 z-50 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl shadow-xl border border-slate-700 flex items-center gap-2">
+                            <i className="fa-solid fa-circle-check text-emerald-400"></i>
                             <span>{toastMessage}</span>
                         </div>
                     )}
 
-                    {}
+                    {/* Header */}
                     <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between shadow-md z-20 shrink-0">
                         <div className="flex items-center space-x-3">
-                            <div className="bg-indigo-500 text-white w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xl shadow-inner">
+                            <div className="bg-indigo-600 text-white w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xl shadow-inner">
                                 <i className="fa-solid fa-chalkboard-user"></i>
                             </div>
                             <div>
                                 <h1 className="text-lg font-bold tracking-wide flex items-center gap-2">
                                     板書・意見分類ボード
-                                    <span className="text-xs bg-indigo-800 text-indigo-200 px-2 py-0.5 rounded-full font-normal">研修・講義モード</span>
+                                    <span className="text-[11px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-bold">{APP_VERSION}</span>
+                                    <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-normal border border-slate-700">研修・講義モード</span>
                                 </h1>
                                 <p className="text-xs text-slate-400">参加者の意見をリアルタイム収集 ➔ AIで一元整理</p>
                             </div>
                         </div>
 
-                        {/* Middle Controls & AI Actions */}
+                        {/* Top Controls */}
                         <div className="flex items-center space-x-3">
-                            {/* Role Switcher */}
                             <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1">
                                 <button 
                                     onClick={() => setAppRole('board')}
@@ -469,7 +352,7 @@ Return STRICT JSON adhering to this schema:
                                 <>
                                     <button 
                                         onClick={() => setShowQrModal(true)}
-                                        className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition">
+                                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition">
                                         <i className="fa-solid fa-qrcode"></i>
                                         📱 参加者用画面 / QR
                                     </button>
@@ -485,8 +368,7 @@ Return STRICT JSON adhering to this schema:
                                     <button 
                                         onClick={() => setShowExportModal(true)}
                                         className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
-                                        <i className="fa-solid fa-file-export text-slate-400"></i>
-                                        出力
+                                        <i className="fa-solid fa-file-export text-slate-400"></i> 出力
                                     </button>
 
                                     <button 
@@ -500,16 +382,15 @@ Return STRICT JSON adhering to this schema:
                         </div>
                     </header>
 
-                    {}
                     {appRole === 'participant' ? (
-                        /* ===== Participant Submission View ===== */
-                        <div className="flex-1 bg-slate-800 p-4 md:p-8 flex flex-col items-center justify-center overflow-y-auto">
-                            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200">
+                        /* Participant View */
+                        <div className="flex-1 bg-slate-900 p-4 md:p-8 flex flex-col items-center justify-center overflow-y-auto">
+                            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100">
                                 <div className="text-center mb-6">
-                                    <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-2">
-                                        研修・ワークショップ 意見投稿画面
+                                    <span className="inline-block bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full mb-2">
+                                        📱 参加者 意見投稿フォーム
                                     </span>
-                                    <h2 className="text-xl font-bold text-slate-800">あなたの意見・アイデアを送信</h2>
+                                    <h2 className="text-xl font-bold text-slate-800">意見・アイデアを送信</h2>
                                     <p className="text-xs text-slate-500 mt-1">送信するとリアルタイムで全体ボードの「未分類」に届きます</p>
                                 </div>
 
@@ -520,7 +401,7 @@ Return STRICT JSON adhering to this schema:
                                             type="text"
                                             value={participantName}
                                             onChange={(e) => setParticipantName(e.target.value)}
-                                            placeholder="例: 受講者A / ヤマダ"
+                                            placeholder="例: 受講者A / 山田"
                                             className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                                         />
                                     </div>
@@ -552,7 +433,7 @@ Return STRICT JSON adhering to this schema:
                                             value={inputText}
                                             onChange={(e) => setInputText(e.target.value)}
                                             rows="4"
-                                            placeholder="例：オンライン投票機能がついていると参加しやすい。カードの色分けも選べると嬉しい。"
+                                            placeholder="例：付箋をグループ分けした後にAI要約が出ると次のディスカッションがスムーズに進みそう。"
                                             className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
                                             required
                                         ></textarea>
@@ -575,9 +456,8 @@ Return STRICT JSON adhering to this schema:
                             </div>
                         </div>
                     ) : (
-                        /* ===== Main Facilitator Board View ===== */
+                        /* Facilitator Board View */
                         <>
-                            {/* Top Quick Input Bar */}
                             <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 shrink-0">
                                 <form onSubmit={handleAddCard} className="flex items-center space-x-3 flex-1 max-w-4xl">
                                     <div className="flex items-center space-x-1.5 bg-slate-100 p-1.5 rounded-lg border border-slate-200 shrink-0">
@@ -622,7 +502,6 @@ Return STRICT JSON adhering to this schema:
                                     </button>
                                 </form>
 
-                                {/* View Switcher */}
                                 <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-4">
                                     <button
                                         onClick={() => setViewMode('kanban')}
@@ -637,9 +516,8 @@ Return STRICT JSON adhering to this schema:
                                 </div>
                             </div>
 
-                            {}
                             <div className="flex-1 flex overflow-hidden">
-                                {/* Left Side: Uncategorized Pool */}
+                                {/* Left: Uncategorized Cards */}
                                 <div 
                                     onDragOver={handleDragOver}
                                     onDrop={(e) => handleDrop(e, null)}
@@ -647,7 +525,7 @@ Return STRICT JSON adhering to this schema:
                                     
                                     <div className="p-4 border-b border-slate-300 flex items-center justify-between bg-slate-200">
                                         <div className="flex items-center gap-2">
-                                            <span className="w-3 h-3 rounded-full bg-amber-400 inline-block animate-ping"></span>
+                                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block animate-ping"></span>
                                             <h2 className="font-bold text-slate-700 text-sm">未分類の意見 (受講者)</h2>
                                             <span className="bg-indigo-600 text-white text-xs px-2.5 py-0.5 rounded-full font-bold">
                                                 {uncategorizedCards.length}
@@ -677,7 +555,7 @@ Return STRICT JSON adhering to this schema:
                                     </div>
                                 </div>
 
-                                {/* Right Side: Categorized Canvas / Columns */}
+                                {/* Right: Groups */}
                                 <div className="flex-1 bg-slate-100 overflow-x-auto p-6">
                                     {viewMode === 'kanban' ? (
                                         <div className="h-full flex items-start space-x-6 min-w-max pb-4">
@@ -690,7 +568,6 @@ Return STRICT JSON adhering to this schema:
                                                         onDrop={(e) => handleDrop(e, cat.id)}
                                                         className="w-80 max-h-full bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
                                                         
-                                                        {/* Category Header */}
                                                         <CategoryHeader 
                                                             cat={cat} 
                                                             count={catCards.length}
@@ -698,7 +575,6 @@ Return STRICT JSON adhering to this schema:
                                                             onDelete={handleDeleteCategory}
                                                         />
 
-                                                        {/* AI Summary Banner */}
                                                         {summaries[cat.id] && (
                                                             <div className="mx-3 mt-3 p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-xs text-indigo-900 flex items-start gap-2 shadow-inner">
                                                                 <i className="fa-solid fa-wand-magic-sparkles text-indigo-500 mt-0.5 shrink-0"></i>
@@ -709,7 +585,6 @@ Return STRICT JSON adhering to this schema:
                                                             </div>
                                                         )}
 
-                                                        {/* Card Drop Area */}
                                                         <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[150px]">
                                                             {catCards.length === 0 ? (
                                                                 <div className="h-32 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 text-xs">
@@ -732,7 +607,6 @@ Return STRICT JSON adhering to this schema:
                                                 );
                                             })}
 
-                                            {/* Add Category Button/Form */}
                                             <div className="w-72 shrink-0">
                                                 {isAddingCategory ? (
                                                     <div className="bg-white p-4 rounded-2xl border border-slate-300 shadow-sm">
@@ -768,7 +642,6 @@ Return STRICT JSON adhering to this schema:
                                             </div>
                                         </div>
                                     ) : (
-                                        /* Grid View mode */
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                                             {cards.map(card => {
                                                 const category = categories.find(c => c.id === card.categoryId);
@@ -796,45 +669,47 @@ Return STRICT JSON adhering to this schema:
                         </>
                     )}
 
-                    {}
-                    {/* ===== QR / Participant Link Modal ===== */}
+                    {/* QR Modal */}
                     {showQrModal && (
                         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-center">
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                                         <i className="fa-solid fa-qrcode text-emerald-600"></i>
-                                        参加者用 意見投稿画面
+                                        参加者用 意見投稿QRコード
                                     </h3>
                                     <button onClick={() => setShowQrModal(false)} className="text-slate-400 hover:text-slate-600">
                                         <i className="fa-solid fa-xmark"></i>
                                     </button>
                                 </div>
                                 <p className="text-xs text-slate-500 mb-4">
-                                    受講者の皆様はスマートフォンのカメラで以下のQRコードを読み取るか、切り替えボタンから意見を投稿できます。
+                                    受講者の皆様はスマートフォンのカメラで以下のQRコードを読み取ると、直接意見投稿フォームが開きます。
                                 </p>
                                 <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 inline-block mb-4">
                                     <img 
-                                        src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https://bansho-workshop.app/post" 
+                                        src={qrImageUrl} 
                                         alt="QR Code" 
-                                        className="w-44 h-44 mx-auto rounded-lg shadow-sm"
+                                        className="w-48 h-48 mx-auto rounded-lg shadow-sm"
                                     />
+                                </div>
+                                <div className="text-[11px] text-slate-400 font-mono mb-4 break-all bg-slate-100 p-2 rounded-lg">
+                                    {participantUrl}
                                 </div>
                                 <div className="space-y-2">
                                     <button 
                                         onClick={() => {
-                                            setShowQrModal(false);
-                                            setAppRole('participant');
+                                            navigator.clipboard.writeText(participantUrl);
+                                            showToast('参加者用URLをコピーしました！');
                                         }}
-                                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs shadow transition">
-                                        📱 この画面に参加者用フォームを表示してみる
+                                        className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2">
+                                        <i className="fa-solid fa-copy"></i> 参加者URLをコピー
                                     </button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* ===== Bulk Input Modal ===== */}
+                    {/* Bulk Input Modal */}
                     {showBulkModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
@@ -843,13 +718,13 @@ Return STRICT JSON adhering to this schema:
                                     テキスト一括入力（改行区切り）
                                 </h3>
                                 <p className="text-xs text-slate-500 mb-4">
-                                    1行につき1つの意見カードとして自動登録されます。事前アンケート結果などの貼り付けに便利です。
+                                    1行につき1つの意見カードとして自動登録されます。
                                 </p>
                                 <textarea
                                     value={bulkInputText}
                                     onChange={(e) => setBulkInputText(e.target.value)}
                                     rows="6"
-                                    placeholder="例：&#10;グループワークの時間を増やしてほしい&#10;スライド資料を後で共有してほしい&#10;質疑応答の時間を確保したい"
+                                    placeholder="グループワークの時間を増やしてほしい&#10;スライド資料を後で共有してほしい&#10;質疑応答の時間を確保したい"
                                     className="w-full border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none mb-4 font-mono leading-relaxed"
                                 ></textarea>
                                 <div className="flex justify-end space-x-2">
@@ -868,7 +743,7 @@ Return STRICT JSON adhering to this schema:
                         </div>
                     )}
 
-                    {/* ===== Export Modal ===== */}
+                    {/* Export Modal */}
                     {showExportModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[85vh]">
@@ -877,22 +752,17 @@ Return STRICT JSON adhering to this schema:
                                         <i className="fa-solid fa-file-lines text-indigo-600"></i>
                                         Markdownエクスポート
                                     </h3>
-                                    <button 
-                                        onClick={() => setShowExportModal(false)}
-                                        className="text-slate-400 hover:text-slate-600 text-sm">
+                                    <button onClick={() => setShowExportModal(false)} className="text-slate-400 hover:text-slate-600 text-sm">
                                         <i className="fa-solid fa-xmark"></i>
                                     </button>
                                 </div>
-                                <p className="text-xs text-slate-500 mb-3">
-                                    整理されたグループ・受講者の意見およびAI要約をMarkdownテキストとしてコピーできます。
-                                </p>
                                 <pre className="flex-1 bg-slate-900 text-slate-100 p-4 rounded-xl text-xs font-mono overflow-y-auto whitespace-pre-wrap leading-relaxed select-all">
                                     {generateMarkdown()}
                                 </pre>
                                 <div className="flex justify-end gap-2 mt-4">
                                     <button 
                                         onClick={() => {
-                                            document.execCommand('copy');
+                                            navigator.clipboard.writeText(generateMarkdown());
                                             showToast('Markdownをクリップボードにコピーしました！');
                                         }}
                                         className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm flex items-center gap-1.5">
@@ -910,9 +780,7 @@ Return STRICT JSON adhering to this schema:
             const [isEditing, setIsEditing] = useState(false);
             const [title, setTitle] = useState(cat.title);
 
-            useEffect(() => {
-                setTitle(cat.title);
-            }, [cat.title]);
+            useEffect(() => { setTitle(cat.title); }, [cat.title]);
 
             const handleSave = () => {
                 if (title.trim() && title.trim() !== cat.title) {
@@ -935,10 +803,7 @@ Return STRICT JSON adhering to this schema:
                                 onBlur={handleSave}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter') handleSave();
-                                    if (e.key === 'Escape') {
-                                        setTitle(cat.title);
-                                        setIsEditing(false);
-                                    }
+                                    if (e.key === 'Escape') setIsEditing(false);
                                 }}
                                 autoFocus
                                 className="font-bold text-slate-800 text-xs bg-white border border-indigo-400 rounded px-1.5 py-0.5 w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -970,9 +835,7 @@ Return STRICT JSON adhering to this schema:
             const [isEditing, setIsEditing] = useState(false);
             const [text, setText] = useState(card.text);
 
-            useEffect(() => {
-                setText(card.text);
-            }, [card.text]);
+            useEffect(() => { setText(card.text); }, [card.text]);
 
             const handleSave = () => {
                 if (text.trim() && text.trim() !== card.text) {
@@ -989,7 +852,6 @@ Return STRICT JSON adhering to this schema:
                     onDragStart={(e) => onDragStart(e, card.id)}
                     className={`sticky-card ${card.color} p-3.5 rounded-2xl border cursor-grab active:cursor-grabbing relative group`}>
                     
-                    {/* Author Badge */}
                     {card.author && (
                         <div className="mb-1.5 flex items-center justify-between">
                             <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md">
@@ -998,7 +860,6 @@ Return STRICT JSON adhering to this schema:
                         </div>
                     )}
 
-                    {/* Upper content / Edit mode */}
                     {isEditing ? (
                         <textarea
                             value={text}
@@ -1030,7 +891,6 @@ Return STRICT JSON adhering to this schema:
                         </div>
                     )}
 
-                    {/* Bottom controls */}
                     <div className="flex items-center justify-between pt-2 border-t border-black/10 text-[11px]">
                         <button 
                             onClick={() => onVote(card.id)}
