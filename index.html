@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.2.3)</title>
+    <title>板書・意見整理 AI (v1.2.4)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -51,7 +51,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.2.3";
+        const APP_VERSION = "v1.2.4";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -446,27 +446,29 @@
                     )}
 
                     {/* Header */}
-                    <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between shadow-md z-20 shrink-0">
-                        <div className="flex items-center space-x-3">
-                            <div className="bg-indigo-600 text-white w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xl shadow-inner">
+                    <header className={`bg-slate-900 text-white shadow-md z-20 shrink-0 ${isParticipantOnly ? 'px-3.5 py-2' : 'px-6 py-3'} flex items-center justify-between`}>
+                        <div className="flex items-center space-x-2.5">
+                            <div className={`bg-indigo-600 text-white rounded-xl flex items-center justify-center font-bold shadow-inner ${isParticipantOnly ? 'w-7 h-7 text-sm' : 'w-10 h-10 text-xl'}`}>
                                 <i className={isParticipantOnly ? "fa-solid fa-mobile-screen" : "fa-solid fa-chalkboard-user"}></i>
                             </div>
                             <div>
-                                <h1 className="text-lg font-bold tracking-wide flex items-center gap-2">
+                                <h1 className={`${isParticipantOnly ? 'text-sm' : 'text-lg'} font-bold tracking-wide flex items-center gap-1.5`}>
                                     {isParticipantOnly ? "意見投稿フォーム" : "板書・意見分類ボード"}
-                                    <span className="text-[11px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-bold">{APP_VERSION}</span>
-                                    <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-normal border border-slate-700">
-                                        {isParticipantOnly ? "参加者モード" : "研修・講義モード"}
-                                    </span>
+                                    <span className="text-[10px] bg-indigo-600/90 text-white px-1.5 py-0.2 rounded font-mono font-bold">{APP_VERSION}</span>
+                                    {!isParticipantOnly && (
+                                        <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-normal border border-slate-700">
+                                            研修・講義モード
+                                        </span>
+                                    )}
                                 </h1>
-                                <p className="text-xs text-slate-400">
-                                    {isParticipantOnly ? "あなたの意見をリアルタイムに全体ボードへ送信" : "参加者の意見をリアルタイム収集 ➔ AIで一元整理"}
-                                </p>
+                                {!isParticipantOnly && (
+                                    <p className="text-xs text-slate-400">参加者の意見をリアルタイム収集 ➔ AIで一元整理</p>
+                                )}
                             </div>
                         </div>
 
                         {/* Top Controls */}
-                        <div className="flex items-center space-x-3">
+                        <div className="flex items-center space-x-2">
                             {/* 参加者専用URLアクセス時は切り替えタブを非表示 */}
                             {!isParticipantOnly ? (
                                 <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1">
@@ -482,12 +484,13 @@
                                     </button>
                                 </div>
                             ) : (
-                                <div className="flex items-center gap-2">
-                                    <span className="flex items-center gap-1.5 text-xs bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 px-3 py-1.5 rounded-xl">
-                                        <span className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                                        {peerConnected ? 'ボード接続中' : '待機中'}
-                                    </span>
-                                </div>
+                                <button 
+                                    onClick={() => connectToHost()}
+                                    title={peerConnected ? "講師ボードとP2P接続中" : "タップして再接続を試行"}
+                                    className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border transition font-medium cursor-pointer active:scale-95 ${peerConnected ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60' : 'bg-amber-950/90 text-amber-300 border-amber-600/70 hover:bg-amber-900'}`}>
+                                    <span className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                                    <span>{peerConnected ? 'ボード接続中' : '待機中 (タップ再接続)'}</span>
+                                </button>
                             )}
 
                             {appRole === 'board' && !isParticipantOnly && (
@@ -525,77 +528,66 @@
                     </header>
 
                     {appRole === 'participant' ? (
-                        /* Participant View */
-                        <div className="flex-1 bg-slate-900 p-4 md:p-8 overflow-y-auto flex flex-col items-center">
-                            <div className="max-w-lg w-full space-y-6 my-auto py-4">
+                        /* Participant View (スマホ最適化・省スペース) */
+                        <div className="flex-1 bg-slate-900 p-2.5 sm:p-4 overflow-y-auto flex flex-col items-center">
+                            <div className="max-w-md w-full space-y-2.5 my-auto">
                                 {/* 投稿フォームカード */}
-                                <div className="bg-white rounded-3xl p-6 shadow-2xl border border-slate-100">
-                                    <div className="text-center mb-6">
-                                        <span className="inline-block bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full mb-2">
-                                            📱 参加者 意見投稿フォーム
-                                        </span>
-                                        <h2 className="text-xl font-bold text-slate-800">意見・アイデアを送信</h2>
-                                        <p className="text-xs text-slate-500 mt-1">送信するとリアルタイムで全体ボードの「未分類」に届きます</p>
-                                    </div>
-
-                                    <form onSubmit={handleAddCard} className="space-y-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-600 mb-1">お名前・ニックネーム (任意)</label>
+                                <div className="bg-white rounded-2xl p-3.5 shadow-xl border border-slate-100">
+                                    <form onSubmit={handleAddCard} className="space-y-2">
+                                        {/* 名前 & カラー選択（1行に集約） */}
+                                        <div className="flex items-center gap-2">
                                             <input 
                                                 type="text"
                                                 value={participantName}
                                                 onChange={(e) => setParticipantName(e.target.value)}
-                                                placeholder="例: 受講者A / 山田"
-                                                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                                placeholder="名前 (任意)"
+                                                className="w-28 sm:w-32 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none shrink-0"
                                             />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-600 mb-1">付箋の色を選択</label>
-                                            <div className="flex items-center space-x-2 bg-slate-100 p-2 rounded-xl">
+                                            <div className="flex-1 flex items-center space-x-1 bg-slate-100 p-1 rounded-lg">
                                                 {[
-                                                    { id: 'sticky-yellow', bg: 'bg-yellow-300', label: '黄' },
-                                                    { id: 'sticky-green', bg: 'bg-emerald-300', label: '緑' },
-                                                    { id: 'sticky-blue', bg: 'bg-sky-300', label: '青' },
-                                                    { id: 'sticky-pink', bg: 'bg-pink-300', label: '赤' },
-                                                    { id: 'sticky-purple', bg: 'bg-purple-300', label: '紫' }
+                                                    { id: 'sticky-yellow', bg: 'bg-yellow-300' },
+                                                    { id: 'sticky-green', bg: 'bg-emerald-300' },
+                                                    { id: 'sticky-blue', bg: 'bg-sky-300' },
+                                                    { id: 'sticky-pink', bg: 'bg-pink-300' },
+                                                    { id: 'sticky-purple', bg: 'bg-purple-300' }
                                                 ].map(color => (
                                                     <button
                                                         key={color.id}
                                                         type="button"
                                                         onClick={() => setSelectedColor(color.id)}
-                                                        className={`flex-1 h-8 rounded-lg ${color.bg} flex items-center justify-center font-bold text-xs transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60'}`}>
+                                                        className={`flex-1 h-6 rounded ${color.bg} flex items-center justify-center font-bold text-[10px] transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60 hover:opacity-100'}`}>
                                                         {selectedColor === color.id && '✓'}
                                                     </button>
                                                 ))}
                                             </div>
                                         </div>
 
+                                        {/* 意見入力テキストエリア */}
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-600 mb-1">意見・アイデア本文</label>
                                             <textarea
                                                 value={inputText}
                                                 onChange={(e) => setInputText(e.target.value)}
-                                                rows="3"
-                                                placeholder="例：付箋をグループ分けした後にAI要約が出ると次のディスカッションがスムーズに進みそう。"
-                                                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
+                                                rows="2"
+                                                placeholder="意見・アイデアを入力..."
+                                                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-normal resize-none"
                                                 required
                                             ></textarea>
                                         </div>
 
+                                        {/* 送信ボタン */}
                                         <button
                                             type="submit"
-                                            className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-3.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm">
+                                            className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-2 rounded-lg shadow transition flex items-center justify-center gap-1.5 text-xs">
                                             <i className="fa-solid fa-paper-plane"></i> 意見を送信する
                                         </button>
                                     </form>
 
                                     {/* 講師画面から切り替えたときのみ戻るリンクを表示 */}
                                     {!isParticipantOnly && (
-                                        <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+                                        <div className="mt-2 pt-2 border-t border-slate-100 text-center">
                                             <button 
                                                 onClick={() => setAppRole('board')}
-                                                className="text-xs text-indigo-600 hover:underline font-bold">
+                                                className="text-[11px] text-indigo-600 hover:underline font-bold">
                                                 ← 講師用メインボード表示に戻る
                                             </button>
                                         </div>
@@ -603,63 +595,62 @@
                                 </div>
 
                                 {/* 📜 自分の投稿履歴セクション */}
-                                <div className="bg-slate-800/90 rounded-3xl p-5 border border-slate-700 shadow-xl backdrop-blur-sm">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                            <i className="fa-solid fa-clock-rotate-left text-amber-400"></i>
+                                <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm">
+                                    <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/80">
+                                        <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                            <i className="fa-solid fa-clock-rotate-left text-amber-400 text-[11px]"></i>
                                             あなたの投稿履歴
-                                            <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[11px] px-2 py-0.5 rounded-full font-mono">
+                                            <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
                                                 {myHistory.length} 件
                                             </span>
                                         </h3>
                                         {myHistory.length > 0 && (
                                             <button 
                                                 onClick={handleClearHistory}
-                                                className="text-[11px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
-                                                <i className="fa-solid fa-trash-can text-[10px]"></i> 履歴クリア
+                                                className="text-[10px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
+                                                <i className="fa-solid fa-trash-can text-[9px]"></i> 履歴消去
                                             </button>
                                         )}
                                     </div>
 
                                     {myHistory.length === 0 ? (
-                                        <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-2xl">
-                                            <i className="fa-solid fa-feather-pointed text-2xl text-slate-600 mb-2"></i>
-                                            <p className="text-xs text-slate-400 font-medium">まだ投稿した意見はありません</p>
-                                            <p className="text-[11px] text-slate-500 mt-0.5">送信した意見はここに一覧として保存されます</p>
+                                        <div className="text-center py-4 border border-dashed border-slate-700 rounded-xl">
+                                            <p className="text-[11px] text-slate-400 font-medium">まだ投稿した意見はありません</p>
+                                            <p className="text-[10px] text-slate-500">送信した意見はここに一覧として保存されます</p>
                                         </div>
                                     ) : (
-                                        <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                                        <div className="space-y-1.5 max-h-[52vh] overflow-y-auto pr-1">
                                             {myHistory.map((item) => (
                                                 <div 
                                                     key={item.id} 
-                                                    className={`${item.color} p-3 rounded-2xl border shadow-sm flex flex-col justify-between transition hover:shadow-md`}>
-                                                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                    className={`${item.color} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
+                                                    <div className="flex items-center justify-between gap-1.5 mb-1">
                                                         <div className="flex items-center gap-1.5">
-                                                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded">
+                                                            <span className="text-[9px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded">
                                                                 {item.author || '受講者'}
                                                             </span>
                                                             {item.createdAt && (
-                                                                <span className="text-[10px] text-black/60 font-mono">
+                                                                <span className="text-[9px] text-black/60 font-mono">
                                                                     🕒 {item.createdAt}
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        <div className="flex items-center gap-1.5">
+                                                        <div className="flex items-center gap-1">
                                                             <button 
                                                                 onClick={() => handleReuseHistory(item)}
                                                                 title="この内容をもう一度入力欄にセット"
-                                                                className="text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow-xs">
-                                                                <i className="fa-solid fa-arrow-rotate-left"></i> 再利用
+                                                                className="text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 shadow-2xs">
+                                                                <i className="fa-solid fa-arrow-rotate-left text-[8px]"></i> 再利用
                                                             </button>
                                                             <button 
                                                                 onClick={() => handleCancelSend(item)}
                                                                 title="この意見の送信を取り消す（講師ボードからも削除）"
-                                                                className="text-rose-700 hover:text-white bg-rose-500/15 hover:bg-rose-600 px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 border border-rose-400/30">
-                                                                <i className="fa-solid fa-trash-can text-[9px]"></i> 取り消し
+                                                                className="text-rose-700 hover:text-white bg-rose-500/15 hover:bg-rose-600 px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 border border-rose-400/30">
+                                                                <i className="fa-solid fa-trash-can text-[8px]"></i> 取消
                                                             </button>
                                                         </div>
                                                     </div>
-                                                    <p className="text-xs font-medium leading-relaxed break-words text-slate-800">
+                                                    <p className="text-xs font-medium leading-snug break-words text-slate-800">
                                                         {item.text}
                                                     </p>
                                                 </div>
