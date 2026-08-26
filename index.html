@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.14.0)</title>
+    <title>板書・意見整理 AI (v1.14.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.14.0";
+        const APP_VERSION = "v1.14.1";
 
         // 付箋カラーパレット定義（番号①〜⑧付き・班別手動選択対応）
         const COLOR_PALETTE = [
@@ -170,10 +170,19 @@
             const [participantName, setParticipantName] = useState(() => {
                 return localStorage.getItem('bansho_my_name') || '';
             });
+            const [facilitatorName, setFacilitatorName] = useState(() => {
+                return localStorage.getItem('bansho_facilitator_name') || '講師';
+            });
+            const [inputLevel, setInputLevel] = useState(0); // 講師追加時の初期階層 (0=大, 1=中, 2=小)
             const [inputText, setInputText] = useState('');
             const [selectedColor, setSelectedColor] = useState(() => {
                 return localStorage.getItem('bansho_selected_color') || 'sticky-yellow';
             });
+
+            // 講師の入力名をブラウザに記憶
+            useEffect(() => {
+                localStorage.setItem('bansho_facilitator_name', facilitatorName);
+            }, [facilitatorName]);
 
             // 手動選択した色をブラウザに記憶
             useEffect(() => {
@@ -743,13 +752,17 @@
                 const now = new Date();
                 const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
+                const cardAuthor = appRole === 'board' ? (facilitatorName.trim() || '講師') : (participantName.trim() || '受講者');
+                const cardLevel = appRole === 'board' ? inputLevel : 0;
+
                 const newCard = {
                     id: 'c-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
                     text: inputText.trim(),
                     color: selectedColor,
                     categoryId: null,
                     votes: 0,
-                    author: participantName.trim() || (appRole === 'board' ? '講師' : '受講者'),
+                    author: cardAuthor,
+                    level: cardLevel,
                     createdAt: timeStr
                 };
 
@@ -914,6 +927,15 @@
                         }
                         return c;
                     });
+                    broadcastToClients({ type: 'SYNC_CARDS', cards: nextCards, themeTitle: sessionThemeTitleRef.current });
+                    return nextCards;
+                });
+            };
+
+            // 🎨 付箋のカラーを変更（中項目・小項目の色分け対応）
+            const handleChangeCardColor = (cardId, newColor) => {
+                setCards(prevCards => {
+                    const nextCards = prevCards.map(c => c.id === cardId ? { ...c, color: newColor } : c);
                     broadcastToClients({ type: 'SYNC_CARDS', cards: nextCards, themeTitle: sessionThemeTitleRef.current });
                     return nextCards;
                 });
@@ -1644,8 +1666,46 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     ) : (
                         /* Facilitator Board View */
                         <>
-                            <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 shrink-0">
-                                <form onSubmit={handleAddCard} className="flex items-center space-x-3 flex-1 max-w-4xl">
+                            <div className="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between shadow-sm z-10 shrink-0 gap-3">
+                                <form onSubmit={handleAddCard} className="flex items-center space-x-2.5 flex-1 max-w-5xl">
+                                    {/* ① 講師の名前入力 */}
+                                    <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 shrink-0">
+                                        <span className="text-[11px] font-bold text-slate-500 shrink-0">👤 名前:</span>
+                                        <input 
+                                            type="text"
+                                            value={facilitatorName}
+                                            onChange={(e) => setFacilitatorName(e.target.value)}
+                                            placeholder="講師"
+                                            className="w-16 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                    </div>
+
+                                    {/* 階層選択（大 / ↳中 / ↳↳小） */}
+                                    <div className="flex items-center space-x-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200 shrink-0">
+                                        <button
+                                            type="button"
+                                            onClick={() => setInputLevel(0)}
+                                            title="大項目（第1階層・親）として追加"
+                                            className={`px-2 py-1 rounded text-[11px] font-bold transition ${inputLevel === 0 ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+                                            大
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setInputLevel(1)}
+                                            title="中項目（第2階層・子）として追加"
+                                            className={`px-2 py-1 rounded text-[11px] font-bold transition flex items-center gap-0.5 ${inputLevel === 1 ? 'bg-amber-100 text-amber-900 shadow-xs font-black' : 'text-slate-500 hover:text-slate-800'}`}>
+                                            <span>↳</span> 中
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setInputLevel(2)}
+                                            title="小項目（第3階層・具体）として追加"
+                                            className={`px-2 py-1 rounded text-[11px] font-bold transition flex items-center gap-0.5 ${inputLevel === 2 ? 'bg-indigo-100 text-indigo-900 shadow-xs font-black' : 'text-slate-500 hover:text-slate-800'}`}>
+                                            <span>↳↳</span> 小
+                                        </button>
+                                    </div>
+
+                                    {/* カラーパレット */}
                                     <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0">
                                         {COLOR_PALETTE.map(color => (
                                             <button
@@ -1659,27 +1719,27 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         ))}
                                     </div>
 
-                                    <div className="relative flex-1">
+                                    <div className="relative flex-1 min-w-[200px]">
                                         <input
                                             type="text"
                                             value={inputText}
                                             onChange={(e) => setInputText(e.target.value)}
-                                            placeholder="💡 講師の直接追加: 意見を入力してEnter..."
-                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+                                            placeholder={inputLevel === 1 ? "↳ 中項目を入力してEnter..." : (inputLevel === 2 ? "↳↳ 小項目・具体意見を入力してEnter..." : "💡 意見・大項目を入力してEnter...")}
+                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
                                         />
-                                        <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono">Enter ↵</span>
+                                        <span className="absolute right-3 top-2 text-[10px] text-slate-400 font-mono">Enter ↵</span>
                                     </div>
 
                                     <button
                                         type="submit"
-                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 shrink-0 shadow-sm">
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition flex items-center gap-1.5 shrink-0 shadow-sm active:scale-95">
                                         <i className="fa-solid fa-plus"></i> 追加
                                     </button>
 
                                     <button
                                         type="button"
                                         onClick={() => setShowBulkModal(true)}
-                                        className="text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 px-3 py-2 rounded-lg text-xs font-medium transition flex items-center gap-1 border border-slate-200 shrink-0">
+                                        className="text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 border border-slate-200 shrink-0">
                                         <i className="fa-solid fa-list-check"></i> 一括入力
                                     </button>
                                 </form>
@@ -1733,6 +1793,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                     onDelete={handleDeleteCard}
                                                     onUpdateText={handleUpdateCardText}
                                                     onChangeLevel={handleChangeCardLevel}
+                                                    onChangeColor={handleChangeCardColor}
                                                 />
                                             ))
                                         )}
@@ -1786,6 +1847,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                                         onDelete={handleDeleteCard}
                                                                         onUpdateText={handleUpdateCardText}
                                                                         onChangeLevel={handleChangeCardLevel}
+                                                                        onChangeColor={handleChangeCardColor}
                                                                     />
                                                                 ))
                                                             )}
@@ -1846,6 +1908,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             onDelete={handleDeleteCard}
                                                             onUpdateText={handleUpdateCardText}
                                                             onChangeLevel={handleChangeCardLevel}
+                                                            onChangeColor={handleChangeCardColor}
                                                         />
                                                     </div>
                                                 );
@@ -2370,8 +2433,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
             );
         }
 
-        function StickyCard({ card, onDragStart, onCardDrop, onVote, onDelete, onUpdateText, onChangeLevel }) {
+        function StickyCard({ card, onDragStart, onCardDrop, onVote, onDelete, onUpdateText, onChangeLevel, onChangeColor }) {
             const [isEditing, setIsEditing] = useState(false);
+            const [showColorPicker, setShowColorPicker] = useState(false);
             const [text, setText] = useState(card.text);
             const [isDragOver, setIsDragOver] = useState(false);
 
@@ -2410,7 +2474,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     }}
                     className={`sticky-card ${card.color} ${indentClass} p-3 rounded-2xl border cursor-grab active:cursor-grabbing relative group transition-all duration-150 ${isDragOver ? 'ring-2 ring-indigo-500 scale-[1.02] shadow-lg border-indigo-400' : ''}`}>
                     
-                    {/* 上段ヘッダー：名前・階層インジケータ ＋ 【階層調整ボタン ＆ いいね ＆ 削除】 */}
+                    {/* 上段ヘッダー：名前・階層インジケータ ＋ 【階層調整・色変更・いいね・削除】 */}
                     <div className="mb-2 flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                             {/* 階層バッジ（中・小の場合に表示） */}
@@ -2435,7 +2499,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             )}
                         </div>
 
-                        {/* アクションボタン群（階層変更・いいね・削除） */}
+                        {/* アクションボタン群（階層変更・色変更・いいね・削除） */}
                         <div className="flex items-center gap-1 shrink-0">
                             {/* 階層変更ボタン（ホバー時・または階層設定時に表示） */}
                             {onChangeLevel && (
@@ -2465,6 +2529,19 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 </div>
                             )}
 
+                            {/* 🎨 カードカラー変更ボタン（クリックでパレット開閉） */}
+                            {onChangeColor && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowColorPicker(!showColorPicker);
+                                    }}
+                                    title="付箋の色を変更（中項目の色分けなど）"
+                                    className="opacity-30 group-hover:opacity-100 hover:bg-white text-slate-700 hover:text-amber-600 w-5 h-5 rounded-lg flex items-center justify-center text-[10px] transition bg-white/60 border border-black/5 cursor-pointer">
+                                    <i className="fa-solid fa-palette"></i>
+                                </button>
+                            )}
+
                             {/* いいねボタン */}
                             <button 
                                 onClick={(e) => {
@@ -2489,6 +2566,27 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             </button>
                         </div>
                     </div>
+
+                    {/* 🎨 カラーパレットポップアップ（色選択） */}
+                    {showColorPicker && onChangeColor && (
+                        <div 
+                            onClick={(e) => e.stopPropagation()}
+                            className="mb-2 p-1.5 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200 flex items-center justify-between gap-1 animate-in fade-in zoom-in duration-100">
+                            {COLOR_PALETTE.map(color => (
+                                <button
+                                    key={color.id}
+                                    type="button"
+                                    onClick={() => {
+                                        onChangeColor(card.id, color.id);
+                                        setShowColorPicker(false);
+                                    }}
+                                    title={`カラー: ${color.numLabel} ${color.name}`}
+                                    className={`w-5 h-5 rounded-md ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-[9px] transition ${card.color === color.id ? 'ring-2 ring-slate-800 scale-110' : 'hover:scale-105 opacity-70 hover:opacity-100'}`}>
+                                    {color.numLabel}
+                                </button>
+                            ))}
+                        </div>
+                    )}
 
                     {/* 付箋本文 */}
                     {isEditing ? (
