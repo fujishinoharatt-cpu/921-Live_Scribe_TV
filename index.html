@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.17.4)</title>
+    <title>板書・意見整理 AI (v1.17.5)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.17.4";
+        const APP_VERSION = "v1.17.5";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -148,7 +148,21 @@
             const urlParams = new URLSearchParams(window.location.search);
             const isParticipantOnly = urlParams.get('role') === 'participant';
             const initialRole = isParticipantOnly ? 'participant' : 'board';
-            const roomHostId = urlParams.get('room') || 'workshop-main-room';
+            const targetRoomParam = urlParams.get('room') || '';
+
+            // 講師用ホストルームID（ユニーク生成または保存済みIDを使用）
+            const getInitialHostRoomId = () => {
+                if (targetRoomParam) return targetRoomParam;
+                let saved = localStorage.getItem('bansho_host_room_id');
+                if (!saved) {
+                    saved = 'room-' + Math.random().toString(36).substring(2, 8);
+                    localStorage.setItem('bansho_host_room_id', saved);
+                }
+                return saved;
+            };
+
+            const [activeRoomId, setActiveRoomId] = useState(isParticipantOnly ? targetRoomParam : getInitialHostRoomId());
+            const [connectedCount, setConnectedCount] = useState(0);
 
             const [appRole, setAppRole] = useState(initialRole);
 
@@ -435,25 +449,45 @@
 
             // PeerJSによるリアルタイムP2P同期設定
             useEffect(() => {
+                let isMounted = true;
+
                 try {
-                    const peer = new Peer(appRole === 'board' ? roomHostId : undefined);
+                    // 講師はactiveRoomIdでホスト登録、参加者はランダムIDで初期化
+                    const peerIdToUse = (appRole === 'board') ? activeRoomId : undefined;
+                    const peer = new Peer(peerIdToUse, {
+                        debug: 1
+                    });
                     peerRef.current = peer;
 
                     peer.on('open', (id) => {
                         console.log('Peer connected with ID:', id);
-                        if (appRole === 'participant') {
-                            connectToHost(peer);
+                        if (!isMounted) return;
+
+                        if (appRole === 'board') {
+                            setActiveRoomId(id);
+                        } else if (appRole === 'participant') {
+                            connectToHost(peer, activeRoomId);
                         }
                     });
 
                     peer.on('error', (err) => {
-                        console.warn('Peer error:', err);
+                        console.warn('Peer error:', err.type, err.message);
+                        // ホストIDが衝突していた場合はランダムIDで再試行
+                        if (appRole === 'board' && (err.type === 'unavailable-id' || err.type === 'invalid-id')) {
+                            const newRoomId = 'room-' + Math.random().toString(36).substring(2, 8);
+                            localStorage.setItem('bansho_host_room_id', newRoomId);
+                            setActiveRoomId(newRoomId);
+                        }
+                        if (appRole === 'participant') {
+                            setPeerConnected(false);
+                        }
                     });
 
                     if (appRole === 'board') {
                         peer.on('connection', (conn) => {
                             console.log('Host received new connection from:', conn.peer);
                             hostConnsRef.current.push(conn);
+                            setConnectedCount(hostConnsRef.current.length);
 
                             conn.on('open', () => {
                                 // 接続した参加者に最新の全カード一覧、テーマ、タイマー、ロック、スライドURLを同期送信
@@ -473,6 +507,7 @@
 
                             conn.on('close', () => {
                                 hostConnsRef.current = hostConnsRef.current.filter(c => c !== conn);
+                                setConnectedCount(hostConnsRef.current.length);
                             });
 
                             conn.on('data', (data) => {
@@ -532,24 +567,26 @@
                 }
 
                 return () => {
+                    isMounted = false;
                     if (peerRef.current) peerRef.current.destroy();
                 };
-            }, [appRole]);
+            }, [appRole, activeRoomId]);
 
             // ホスト接続関数（参加者側）
-            const connectToHost = (peerInstance) => {
+            const connectToHost = (peerInstance, targetRoomId) => {
                 const p = peerInstance || peerRef.current;
-                if (!p || p.destroyed) return;
+                const roomId = targetRoomId || activeRoomId;
+                if (!p || p.destroyed || !roomId) return;
                 try {
-                    const conn = p.connect(roomHostId, { reliable: true });
+                    const conn = p.connect(roomId, { reliable: true });
                     connRef.current = conn;
                     conn.on('open', () => {
-                        console.log('Connected to host:', roomHostId);
+                        console.log('Connected to host:', roomId);
                         setPeerConnected(true);
                         conn.send({ type: 'REQUEST_SYNC' });
                     });
                     conn.on('close', () => {
-                        console.log('Host connection closed. Retrying...');
+                        console.log('Host connection closed');
                         setPeerConnected(false);
                     });
                     conn.on('error', (err) => {
@@ -608,29 +645,21 @@
                             if (data.title) setSessionThemeTitle(data.title);
                         }
                     });
-                    conn.on('close', () => {
-                        console.log('Connection to host closed');
-                        setPeerConnected(false);
-                    });
-                    conn.on('error', (err) => {
-                        console.warn('Connection error:', err);
-                        setPeerConnected(false);
-                    });
                 } catch (err) {
                     console.error('Failed to connect to host:', err);
                 }
             };
 
-            // 参加者専用：未接続時の自動リトライ（4秒間隔でバックグラウンド接続試行）
+            // 参加者専用：未接続時の自動リトライ（3秒間隔でバックグラウンド接続試行）
             useEffect(() => {
                 if (appRole !== 'participant') return;
                 const interval = setInterval(() => {
                     if (!peerConnected && peerRef.current && !peerRef.current.destroyed) {
                         connectToHost();
                     }
-                }, 4000);
+                }, 3000);
                 return () => clearInterval(interval);
-            }, [appRole, peerConnected]);
+            }, [appRole, peerConnected, activeRoomId]);
 
             // P2P確実送信ヘルパー（切断時は自動再接続）
             const sendP2pMessage = (payload, onComplete) => {
@@ -1454,7 +1483,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
             };
 
             // 参加者用URL生成
-            const participantUrl = `${window.location.origin}${window.location.pathname}?role=participant&room=${roomHostId}`;
+            const participantUrl = `${window.location.origin}${window.location.pathname}?role=participant&room=${activeRoomId}`;
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(participantUrl)}`;
             const uncategorizedCards = cards.filter(c => c.categoryId === null);
 
@@ -1535,8 +1564,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             </div>
                         ) : null}
 
-                        {/* ➡ 右側：機能別にグループ化されたボタン群 */}
-                        <div className="flex items-center space-x-2 shrink-0">
                             {/* 参加者専用URLアクセス時 */}
                             {isParticipantOnly ? (
                                 <button 
@@ -1548,6 +1575,14 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 </button>
                             ) : (
                                 <>
+                                    {/* 👥 講師用：受講者のリアルタイム接続状況 */}
+                                    <div 
+                                        onClick={() => setShowQrModal(true)}
+                                        title={`現在 ${connectedCount} 台の受講者スマホとP2P接続中（クリックでQRコード表示）`}
+                                        className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer">
+                                        <span className={`w-2 h-2 rounded-full ${connectedCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
+                                        <span className="text-[11px]">{connectedCount > 0 ? `👥 受講者 ${connectedCount}台 接続` : '👥 受講者 待機中'}</span>
+                                    </div>
                                     {/* 0. ⏱️ 研修進行グループ（タイマー & 投稿受付ロック） */}
                                     <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
                                         {/* タイマー表示 & コントロール */}
