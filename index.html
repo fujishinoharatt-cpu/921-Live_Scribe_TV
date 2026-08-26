@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.19.3)</title>
+    <title>研修ワークナビ AI (v1.20.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.19.3";
+        const APP_VERSION = "v1.20.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -270,6 +270,7 @@
             const [showArchiveModal, setShowArchiveModal] = useState(false);
             const [showNewBoardModal, setShowNewBoardModal] = useState(false);
             const [showSaveSnapshotModal, setShowSaveSnapshotModal] = useState(false);
+            const [showMenuModal, setShowMenuModal] = useState(false);
             const [saveSnapshotTitle, setSaveSnapshotTitle] = useState('');
             const [showConfigModal, setShowConfigModal] = useState(false);
             const [configInputKey, setConfigInputKey] = useState('');
@@ -1525,41 +1526,42 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             setIsEditingThemeTitle(true);
                                         }}
                                         title="クリックしてテーマタイトルを編集"
-                                        className="group flex items-center gap-2 cursor-pointer bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-indigo-500/50 px-4 py-1 rounded-2xl transition shadow-inner max-w-full">
+                                        className="group flex items-center gap-2 cursor-pointer bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-indigo-500/50 px-3.5 py-1.5 rounded-2xl transition shadow-inner w-full">
                                         <span className="bg-amber-400 text-slate-950 font-black text-[10px] sm:text-xs px-2 py-0.5 rounded-md shrink-0 shadow-2xs">
                                             🎯 テーマ
                                         </span>
-                                        <h2 className="text-sm sm:text-base md:text-lg lg:text-xl font-black text-white group-hover:text-indigo-200 transition tracking-wide truncate">
+                                        <h2 className="text-xs sm:text-sm md:text-base font-black text-white group-hover:text-indigo-200 transition tracking-wide leading-snug break-words">
                                             {sessionThemeTitle}
                                         </h2>
-                                        <i className="fa-solid fa-pen text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 group-hover:text-indigo-300 transition shrink-0"></i>
+                                        <i className="fa-solid fa-pen text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 group-hover:text-indigo-300 transition shrink-0 ml-auto"></i>
                                     </div>
                                 )}
                             </div>
                         ) : null}
 
-                        {/* ➡ 右側：機能別にグループ化されたボタン群 */}
+                        {/* ➡ 右側：スリム化された操作ボタン群 */}
                         <div className="flex items-center space-x-2 shrink-0">
                             {/* 参加者専用URLアクセス時 */}
                             {isParticipantOnly ? (
                                 <button 
                                     onClick={() => connectToHost()}
-                                    title={peerConnected ? "講師ボードとP2P接続中" : "タップして再接続を試行"}
+                                    title={peerConnected ? "講師ボードと接続中" : "タップして再接続を試行"}
                                     className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border transition font-medium cursor-pointer active:scale-95 ${peerConnected ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60' : 'bg-amber-950/90 text-amber-300 border-amber-600/70 hover:bg-amber-900'}`}>
                                     <span className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
                                     <span>{peerConnected ? 'ボード接続中' : '待機中 (タップ再接続)'}</span>
                                 </button>
                             ) : (
                                 <>
-                                    {/* 👥 講師用：受講者のリアルタイム接続状況 */}
+                                    {/* 👥 講師用：受講者のリアルタイム接続状況（クリックでQRコード表示） */}
                                     <div 
                                         onClick={() => setShowQrModal(true)}
-                                        title={`現在 ${connectedCount} 台の受講者スマホとP2P接続中（クリックでQRコード表示）`}
-                                        className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer">
+                                        title={`現在 ${connectedCount} 台の受講者と接続中（クリックで参加者QRコード表示）`}
+                                        className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-300 hover:text-white transition cursor-pointer shadow-sm">
                                         <span className={`w-2 h-2 rounded-full ${connectedCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
-                                        <span className="text-[11px]">{connectedCount > 0 ? `👥 受講者 ${connectedCount}台 接続` : '👥 受講者 待機中'}</span>
+                                        <span className="text-[11px]">{connectedCount > 0 ? `👥 受講者 ${connectedCount}台` : '👥 受講者 待機中'}</span>
                                     </div>
-                                    {/* 0. ⏱️ 研修進行グループ（タイマー & 投稿受付ロック） */}
+
+                                    {/* ⏱️ 研修進行グループ（タイマー & 投稿受付ロック） */}
                                     <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
                                         {/* タイマー表示 & コントロール */}
                                         <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
@@ -1602,93 +1604,32 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             <span className="hidden sm:inline">{isSubmissionsLocked ? '受付停止中' : '受付中'}</span>
                                         </button>
                                     </div>
-                                    {/* 1. 受講者・AIメイン操作グループ（鮮やかカラーで目立たせる） */}
-                                    <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                                        <button 
-                                            onClick={() => setShowQrModal(true)}
-                                            title="参加者用QRコード・URLを表示"
-                                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
-                                            <i className="fa-solid fa-qrcode"></i>
-                                            <span className="hidden sm:inline">参加者QR</span>
-                                        </button>
 
-                                        <button 
-                                            onClick={handleAiCluster}
-                                            disabled={isAiProcessing}
-                                            title="Gemini AIで意見を自動分類・要約"
-                                            className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95 disabled:opacity-50">
-                                            <i className={`fa-solid ${isAiProcessing ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'} text-amber-300`}></i>
-                                            <span>{isAiProcessing ? 'AI整理中...' : 'AI整理'}</span>
-                                        </button>
-                                    </div>
+                                    {/* 📄 スライド資料設定ボタン */}
+                                    <button 
+                                        onClick={() => {
+                                            setSlideInputUrl(slideUrl);
+                                            setShowSlideModal(true);
+                                        }}
+                                        title="研修スライド（Googleスライド / PDF）のURL設定"
+                                        className={`px-2.5 py-1.5 rounded-xl border text-xs transition flex items-center gap-1.5 font-bold shadow-sm ${slideUrl ? 'bg-indigo-950 text-indigo-300 border-indigo-500/60 hover:bg-indigo-900' : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'}`}>
+                                        <i className="fa-solid fa-file-powerpoint text-indigo-400"></i>
+                                        <span className="hidden lg:inline">スライド設定</span>
+                                    </button>
 
-                                    {/* 2. 板書データ管理グループ */}
-                                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                                        <button 
-                                            onClick={handleOpenSaveSnapshotModal}
-                                            title="現在の板書を過去の記録に保存（付箋0件でもタイトル付きで保存可能）"
-                                            className="bg-indigo-700 hover:bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
-                                            <i className="fa-solid fa-floppy-disk text-indigo-200"></i>
-                                            <span className="hidden md:inline">保存</span>
-                                        </button>
-
-                                        <button 
-                                            onClick={() => setShowArchiveModal(true)}
-                                            title="過去の板書アーカイブ一覧を表示・復元"
-                                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
-                                            <i className="fa-solid fa-box-archive text-indigo-400"></i>
-                                            <span className="hidden md:inline">記録</span>
-                                            <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
+                                    {/* ⚙️ メニュー・設定統合ボタン（AI整理・保存・記録・新規・設定を一括集約） */}
+                                    <button 
+                                        onClick={() => setShowMenuModal(true)}
+                                        title="メニュー・設定（AI整理 / 保存 / 過去の記録 / 新規板書 / API設定）"
+                                        className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 transition active:scale-95 cursor-pointer">
+                                        <i className="fa-solid fa-bars"></i>
+                                        <span>メニュー</span>
+                                        {archives.length > 0 && (
+                                            <span className="bg-white/20 text-white text-[9px] px-1.5 py-0.2 rounded-full font-mono">
                                                 {archives.length}
                                             </span>
-                                        </button>
-
-                                        <button 
-                                            onClick={handleOpenNewBoardModal}
-                                            title="現在の板書を保存して新しい板書を開始"
-                                            className="text-slate-400 hover:text-white hover:bg-slate-800 px-2 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1">
-                                            <i className="fa-solid fa-folder-plus text-amber-400"></i>
-                                            <span className="hidden lg:inline">新規</span>
-                                        </button>
-                                    </div>
-
-                                    {/* 3. 設定・その他補助グループ */}
-                                    <div className="flex items-center gap-1">
-                                        <button 
-                                            onClick={() => {
-                                                setSlideInputUrl(slideUrl);
-                                                setShowSlideModal(true);
-                                            }}
-                                            title="研修スライド（Googleスライド / PDF）のURL設定"
-                                            className={`border px-2 py-1.5 rounded-lg text-xs transition flex items-center gap-1 font-bold ${slideUrl ? 'bg-indigo-950 text-indigo-300 border-indigo-500/60 hover:bg-indigo-900' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'}`}>
-                                            <i className="fa-solid fa-file-powerpoint text-indigo-400"></i>
-                                            <span className="hidden xl:inline">スライド設定</span>
-                                        </button>
-
-                                        <button 
-                                            onClick={() => setShowExportModal(true)}
-                                            title="マークダウン/テキスト出力"
-                                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1.5 rounded-lg text-xs transition">
-                                            <i className="fa-solid fa-file-export"></i>
-                                        </button>
-
-                                        <button 
-                                            onClick={() => {
-                                                setConfigInputKey(geminiApiKey);
-                                                setShowConfigModal(true);
-                                            }}
-                                            title="Gemini APIキー設定"
-                                            className={`border p-1.5 rounded-lg text-xs transition ${geminiApiKey ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-emerald-600/40' : 'bg-amber-950/80 hover:bg-amber-900 text-amber-300 border-amber-600/60'}`}>
-                                            <i className="fa-solid fa-gear"></i>
-                                        </button>
-
-                                        <button 
-                                            onClick={handleResetData}
-                                            title="データを初期状態にリセット"
-                                            className="bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-200 border border-slate-700 p-1.5 rounded-lg text-xs transition">
-                                            <i className="fa-solid fa-rotate-right"></i>
-                                        </button>
-                                    </div>
+                                        )}
+                                    </button>
                                 </>
                             )}
                         </div>
@@ -3081,6 +3022,150 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                 保存中のAPIキーを削除
                                             </button>
                                         )}
+                    )}
+
+                    {/* ⚙️ メニュー・設定統合モーダル（AI整理・保存・記録・新規・設定を一括集約） */}
+                    {showMenuModal && (
+                        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+                            <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+                                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                        <i className="fa-solid fa-sliders text-indigo-600"></i>
+                                        メニュー・板書管理
+                                    </h3>
+                                    <button 
+                                        onClick={() => setShowMenuModal(false)}
+                                        className="text-slate-400 hover:text-slate-600 p-1 text-base transition">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4 pt-3">
+                                    {/* 1. 🔮 AIアシスト */}
+                                    <div>
+                                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">🔮 AI機能</h4>
+                                        <button
+                                            onClick={() => {
+                                                setShowMenuModal(false);
+                                                handleAiCluster();
+                                            }}
+                                            disabled={isAiProcessing}
+                                            className="w-full p-3 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow font-bold flex items-center justify-between transition active:scale-[0.98] disabled:opacity-50 text-left">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center text-lg">
+                                                    <i className={`fa-solid ${isAiProcessing ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'} text-amber-300`}></i>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-bold">AI自動整理・グループ要約</div>
+                                                    <div className="text-[10px] text-indigo-200 font-normal">受講者の意見を自動で分類し各グループの要約文を作成</div>
+                                                </div>
+                                            </div>
+                                            <i className="fa-solid fa-chevron-right text-xs text-white/60"></i>
+                                        </button>
+                                    </div>
+
+                                    {/* 2. 📁 板書データ管理 */}
+                                    <div>
+                                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">📁 板書データ管理</h4>
+                                        <div className="grid grid-cols-1 gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    setShowMenuModal(false);
+                                                    handleOpenSaveSnapshotModal();
+                                                }}
+                                                className="p-2.5 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50 hover:bg-indigo-50/50 flex items-center justify-between transition text-left group">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm">
+                                                        <i className="fa-solid fa-floppy-disk"></i>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">現在の板書を保存</div>
+                                                        <div className="text-[10px] text-slate-500">名前をつけてアーカイブに記録</div>
+                                                    </div>
+                                                </div>
+                                                <i className="fa-solid fa-chevron-right text-xs text-slate-400 group-hover:text-indigo-600"></i>
+                                            </button>
+
+                                            <button
+                                                onClick={() => {
+                                                    setShowMenuModal(false);
+                                                    setShowArchiveModal(true);
+                                                }}
+                                                className="p-2.5 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50 hover:bg-indigo-50/50 flex items-center justify-between transition text-left group">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm">
+                                                        <i className="fa-solid fa-box-archive"></i>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 flex items-center gap-1.5">
+                                                            <span>過去の記録・復元</span>
+                                                            <span className="bg-indigo-600 text-white text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold">
+                                                                {archives.length}件
+                                                            </span>
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-500">過去の板書ログを表示・復元・JSONバックアップ</div>
+                                                    </div>
+                                                </div>
+                                                <i className="fa-solid fa-chevron-right text-xs text-slate-400 group-hover:text-indigo-600"></i>
+                                            </button>
+
+                                            <button
+                                                onClick={() => {
+                                                    setShowMenuModal(false);
+                                                    handleOpenNewBoardModal();
+                                                }}
+                                                className="p-2.5 rounded-xl border border-slate-200 hover:border-amber-300 bg-slate-50 hover:bg-amber-50/50 flex items-center justify-between transition text-left group">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-sm">
+                                                        <i className="fa-solid fa-folder-plus"></i>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs font-bold text-slate-800 group-hover:text-amber-700">新しい板書を開始</div>
+                                                        <div className="text-[10px] text-slate-500">保存して次のワークショップへ進む</div>
+                                                    </div>
+                                                </div>
+                                                <i className="fa-solid fa-chevron-right text-xs text-slate-400 group-hover:text-amber-700"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* 3. ⚙️ 設定 & 出力 */}
+                                    <div>
+                                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">⚙️ 設定 & 出力</h4>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    setShowMenuModal(false);
+                                                    setShowExportModal(true);
+                                                }}
+                                                className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center gap-2 text-xs font-bold text-slate-700 transition">
+                                                <i className="fa-solid fa-file-export text-indigo-600"></i>
+                                                <span>レポート出力</span>
+                                            </button>
+
+                                            <button
+                                                onClick={() => {
+                                                    setShowMenuModal(false);
+                                                    setConfigInputKey(geminiApiKey);
+                                                    setShowConfigModal(true);
+                                                }}
+                                                className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center gap-2 text-xs font-bold text-slate-700 transition">
+                                                <i className={`fa-solid fa-key ${geminiApiKey ? 'text-emerald-600' : 'text-amber-600'}`}></i>
+                                                <span>APIキー設定</span>
+                                            </button>
+                                        </div>
+
+                                        <div className="pt-2 text-center">
+                                            <button
+                                                onClick={() => {
+                                                    setShowMenuModal(false);
+                                                    handleResetData();
+                                                }}
+                                                className="text-[10px] text-slate-400 hover:text-rose-500 transition flex items-center gap-1 mx-auto">
+                                                <i className="fa-solid fa-rotate-right text-[9px]"></i>
+                                                データを初期サンプルに戻す
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
