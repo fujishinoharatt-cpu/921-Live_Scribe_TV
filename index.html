@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.18.0)</title>
+    <title>板書・意見整理 AI (v1.18.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.18.0";
+        const APP_VERSION = "v1.18.1";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -1698,8 +1698,16 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     )}
                                 </div>
 
-                                {/* タブ切り替えバー（3タブ構成・スマホ横幅対応） */}
+                                {/* タブ切り替えバー（3タブ構成: スライド ➔ 投稿 ➔ 意見） */}
                                 <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1 shrink-0 shadow-md">
+                                    <button 
+                                        onClick={() => setParticipantTab('slide')}
+                                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'slide' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                        <i className="fa-solid fa-file-powerpoint text-indigo-300"></i> スライド
+                                        {slideUrl && (
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                        )}
+                                    </button>
                                     <button 
                                         onClick={() => setParticipantTab('post')}
                                         className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'post' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
@@ -1712,14 +1720,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${participantTab === 'timeline' ? 'bg-white text-indigo-700' : 'bg-slate-700 text-slate-300'}`}>
                                             {cards.length}
                                         </span>
-                                    </button>
-                                    <button 
-                                        onClick={() => setParticipantTab('slide')}
-                                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'slide' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                        <i className="fa-solid fa-file-powerpoint text-indigo-300"></i> スライド
-                                        {slideUrl && (
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                        )}
                                     </button>
                                 </div>
 
