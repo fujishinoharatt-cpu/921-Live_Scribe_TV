@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.17.1)</title>
+    <title>板書・意見整理 AI (v1.17.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.17.1";
+        const APP_VERSION = "v1.17.2";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -1881,7 +1881,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             )}
                                         </div>
                                     </div>
-                                ) : (
+                                ) : participantTab === 'timeline' ? (
                                     /* 💬 みんなの意見タイムラインタブ */
                                     <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0">
                                         {/* 上部コントロールバー（ソート切り替え & 件数） */}
