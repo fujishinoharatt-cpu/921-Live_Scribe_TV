@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.7.0)</title>
+    <title>板書・意見整理 AI (v1.7.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -53,7 +53,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.7.0";
+        const APP_VERSION = "v1.7.1";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -147,6 +147,16 @@
             const peerRef = useRef(null);
             const connRef = useRef(null);
             const hostConnsRef = useRef([]); // 講師ボード接続クライアント一覧
+            const sessionThemeTitleRef = useRef(sessionThemeTitle);
+            const cardsRef = useRef(cards);
+
+            useEffect(() => {
+                sessionThemeTitleRef.current = sessionThemeTitle;
+            }, [sessionThemeTitle]);
+
+            useEffect(() => {
+                cardsRef.current = cards;
+            }, [cards]);
 
             const showToast = (msg) => {
                 setToastMessage(msg);
@@ -161,6 +171,13 @@
                     }
                 });
             };
+
+            // テーマタイトル変更時に全クライアントへ即時自動配信
+            useEffect(() => {
+                if (appRole === 'board') {
+                    broadcastToClients({ type: 'SYNC_THEME', themeTitle: sessionThemeTitle });
+                }
+            }, [sessionThemeTitle, appRole]);
 
             // PeerJSによるリアルタイムP2P同期設定
             useEffect(() => {
@@ -186,7 +203,11 @@
 
                             conn.on('open', () => {
                                 // 接続した参加者に最新の全カード一覧と現在のテーマを同期送信
-                                conn.send({ type: 'SYNC_CARDS', cards, themeTitle: sessionThemeTitle });
+                                conn.send({ 
+                                    type: 'SYNC_CARDS', 
+                                    cards: cardsRef.current, 
+                                    themeTitle: sessionThemeTitleRef.current 
+                                });
                             });
 
                             conn.on('close', () => {
@@ -199,25 +220,41 @@
                                 if (data.type === 'NEW_CARD') {
                                     setCards(prev => {
                                         const next = [data.card, ...prev];
-                                        broadcastToClients({ type: 'SYNC_CARDS', cards: next, themeTitle: sessionThemeTitle });
+                                        broadcastToClients({ 
+                                            type: 'SYNC_CARDS', 
+                                            cards: next, 
+                                            themeTitle: sessionThemeTitleRef.current 
+                                        });
                                         return next;
                                     });
                                     showToast(`📩 ${data.card.author || '受講者'}から意見が届きました！`);
                                 } else if (data.type === 'DELETE_CARD') {
                                     setCards(prev => {
                                         const next = prev.filter(c => c.id !== data.cardId);
-                                        broadcastToClients({ type: 'SYNC_CARDS', cards: next, themeTitle: sessionThemeTitle });
+                                        broadcastToClients({ 
+                                            type: 'SYNC_CARDS', 
+                                            cards: next, 
+                                            themeTitle: sessionThemeTitleRef.current 
+                                        });
                                         return next;
                                     });
                                     showToast(`🗑️ ${data.author || '受講者'}が意見の送信を取り消しました`);
                                 } else if (data.type === 'VOTE_CARD') {
                                     setCards(prev => {
                                         const next = prev.map(c => c.id === data.cardId ? { ...c, votes: Math.max(0, (c.votes || 0) + (data.delta || 1)) } : c);
-                                        broadcastToClients({ type: 'SYNC_CARDS', cards: next, themeTitle: sessionThemeTitle });
+                                        broadcastToClients({ 
+                                            type: 'SYNC_CARDS', 
+                                            cards: next, 
+                                            themeTitle: sessionThemeTitleRef.current 
+                                        });
                                         return next;
                                     });
                                 } else if (data.type === 'REQUEST_SYNC') {
-                                    conn.send({ type: 'SYNC_CARDS', cards, themeTitle: sessionThemeTitle });
+                                    conn.send({ 
+                                        type: 'SYNC_CARDS', 
+                                        cards: cardsRef.current, 
+                                        themeTitle: sessionThemeTitleRef.current 
+                                    });
                                 }
                             });
                         });
@@ -229,7 +266,7 @@
                 return () => {
                     if (peerRef.current) peerRef.current.destroy();
                 };
-            }, [appRole, sessionThemeTitle]);
+            }, [appRole]);
 
             // ホスト接続関数（参加者側）
             const connectToHost = (peerInstance) => {
@@ -248,7 +285,10 @@
                             setCards(data.cards);
                             if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
                         } else if (data && data.type === 'SYNC_THEME') {
-                            if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
+                            if (data.themeTitle) {
+                                setSessionThemeTitle(data.themeTitle);
+                                showToast(`📌 テーマが「${data.themeTitle}」に更新されました`);
+                            }
                         } else if (data && data.type === 'SESSION_STARTED') {
                             showToast(`📢 新しい板書「${data.title || '新規セッション'}」が開始されました！`);
                             if (data.title) setSessionThemeTitle(data.title);
@@ -303,6 +343,9 @@
                         conn.on('data', (data) => {
                             if (data && data.type === 'SYNC_CARDS') {
                                 setCards(data.cards);
+                                if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
+                            } else if (data && data.type === 'SYNC_THEME') {
+                                if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
                             }
                         });
                         conn.on('close', () => setPeerConnected(false));
