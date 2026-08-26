@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.16.0)</title>
+    <title>板書・意見整理 AI (v1.16.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -21,11 +21,19 @@
     <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
     
     <style>
-        body {
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+        html, body {
             font-family: 'Zen Maru Gothic', sans-serif;
             background-color: #f3f4f6;
             height: 100dvh;
             min-height: 100dvh;
+            width: 100%;
+            max-width: 100vw;
+            overflow-x: hidden;
+            margin: 0;
+            padding: 0;
         }
         .sticky-card {
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -52,13 +60,13 @@
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
-<body class="h-[100dvh] min-h-[100dvh] overflow-hidden flex flex-col bg-slate-100 text-slate-800">
-    <div id="root" class="h-full w-full"></div>
+<body class="h-[100dvh] min-h-[100dvh] w-full max-w-full overflow-x-hidden flex flex-col bg-slate-100 text-slate-800">
+    <div id="root" class="h-full w-full max-w-full overflow-x-hidden"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.16.0";
+        const APP_VERSION = "v1.16.1";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -1599,9 +1607,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     </header>
 
                     {appRole === 'participant' ? (
-                        /* Participant View (スマホ最適化・確実表示レイアウト) */
-                        <div className="flex-1 bg-slate-900 p-2 sm:p-4 overflow-hidden flex flex-col items-center justify-start h-full min-h-0">
-                            <div className="max-w-md w-full flex flex-col h-full min-h-0 gap-2">
+                        /* Participant View (スマホ最適化・確実表示レイアウト・横スクロール完全防止) */
+                        <div className="flex-1 bg-slate-900 p-2 sm:p-4 overflow-x-hidden overflow-y-hidden flex flex-col items-center justify-start h-full min-h-0 w-full max-w-full">
+                            <div className="max-w-md w-full max-w-full flex flex-col h-full min-h-0 gap-2 overflow-x-hidden">
                                 
                                 {/* ⏱️ リアルタイム同期タイマーバー */}
                                 {(timerSeconds > 0 || isTimeUp) && (
@@ -1755,8 +1763,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             </div>
                                                         </div>
 
-                                                        {/* ①〜⑧ 番号付きカラーパレット（タップで班・色を選択） */}
-                                                        <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                                                        {/* ①〜⑩ 番号・記号付きカラーパレット（タップで班・色を選択・スマホ横幅に完全フィット） */}
+                                                        <div className="grid grid-cols-10 gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full max-w-full">
                                                             {COLOR_PALETTE.map(color => {
                                                                 const isSelected = selectedColor === color.id;
                                                                 return (
@@ -1765,7 +1773,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                                         type="button"
                                                                         onClick={() => setSelectedColor(color.id)}
                                                                         title={`付箋カラー: ${color.numLabel} ${color.name}`}
-                                                                        className={`flex-1 h-7 rounded-lg ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-xs transition active:scale-95 ${isSelected ? 'ring-2 ring-slate-900 scale-105 shadow-md z-10' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}>
+                                                                        className={`w-full h-6 sm:h-7 rounded-md ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-[10px] sm:text-xs transition active:scale-95 ${isSelected ? 'ring-2 ring-slate-900 scale-105 shadow-md z-10' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}>
                                                                         {color.numLabel}
                                                                     </button>
                                                                 );
