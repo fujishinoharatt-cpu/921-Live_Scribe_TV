@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.20.0)</title>
+    <title>研修ワークナビ AI (v1.20.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.20.0";
+        const APP_VERSION = "v1.20.1";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -3022,6 +3022,10 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                 保存中のAPIキーを削除
                                             </button>
                                         )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     )}
 
                     {/* ⚙️ メニュー・設定統合モーダル（AI整理・保存・記録・新規・設定を一括集約） */}
