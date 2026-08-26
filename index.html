@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.12.0)</title>
+    <title>板書・意見整理 AI (v1.13.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.12.0";
+        const APP_VERSION = "v1.13.0";
 
         // 付箋カラーパレット定義（番号①〜⑧付き・班別手動選択対応）
         const COLOR_PALETTE = [
@@ -1164,45 +1164,77 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         </div>
                     )}
 
-                    {/* Header */}
-                    <header className={`bg-slate-900 text-white shadow-md z-20 shrink-0 ${isParticipantOnly ? 'px-3.5 py-2' : 'px-6 py-3'} flex items-center justify-between`}>
-                        <div className="flex items-center space-x-2.5">
-                            <div className={`bg-indigo-600 text-white rounded-xl flex items-center justify-center font-bold shadow-inner ${isParticipantOnly ? 'w-7 h-7 text-sm' : 'w-10 h-10 text-xl'}`}>
+                    {/* Header (整理された1段統合・中央特大テーマ & 役割別ボタングループ) */}
+                    <header className={`bg-slate-950 text-white shadow-xl z-20 shrink-0 ${isParticipantOnly ? 'px-3.5 py-2' : 'px-5 py-2.5'} flex items-center justify-between border-b border-slate-800 gap-3`}>
+                        
+                        {/* ⬅ 左側：ロゴ & アプリ名（上品にコンパクト化） */}
+                        <div className="flex items-center space-x-2.5 shrink-0">
+                            <div className={`bg-indigo-600 text-white rounded-xl flex items-center justify-center font-bold shadow-inner ${isParticipantOnly ? 'w-7 h-7 text-sm' : 'w-9 h-9 text-lg'}`}>
                                 <i className={isParticipantOnly ? "fa-solid fa-mobile-screen" : "fa-solid fa-chalkboard-user"}></i>
                             </div>
                             <div>
-                                <h1 className={`${isParticipantOnly ? 'text-sm' : 'text-lg'} font-bold tracking-wide flex items-center gap-1.5`}>
-                                    {isParticipantOnly ? "意見投稿フォーム" : "板書・意見分類ボード"}
-                                    <span className="text-[10px] bg-indigo-600/90 text-white px-1.5 py-0.2 rounded font-mono font-bold">{APP_VERSION}</span>
-                                    {!isParticipantOnly && (
-                                        <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-normal border border-slate-700">
-                                            研修・講義モード
-                                        </span>
-                                    )}
+                                <h1 className={`${isParticipantOnly ? 'text-xs' : 'text-sm'} font-bold tracking-wide flex items-center gap-1.5 leading-tight`}>
+                                    {isParticipantOnly ? "意見投稿フォーム" : "板書ボード"}
+                                    <span className="text-[9px] bg-indigo-600/90 text-white px-1.5 py-0.2 rounded font-mono font-bold">{APP_VERSION}</span>
                                 </h1>
                                 {!isParticipantOnly && (
-                                    <p className="text-xs text-slate-400">参加者の意見をリアルタイム収集 ➔ AIで一元整理</p>
+                                    <p className="text-[10px] text-slate-400 hidden xl:block">リアルタイム意見収集 ➔ AI一元整理</p>
                                 )}
                             </div>
                         </div>
 
-                        {/* Top Controls */}
-                        <div className="flex items-center space-x-2">
-                            {/* 参加者専用URLアクセス時は切り替えタブを非表示 */}
-                            {!isParticipantOnly ? (
-                                <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1">
-                                    <button 
-                                        onClick={() => setAppRole('board')}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'board' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                        <i className="fa-solid fa-desktop"></i> 講師ボード
-                                    </button>
-                                    <button 
-                                        onClick={() => setAppRole('participant')}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${appRole === 'participant' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                        <i className="fa-solid fa-mobile-screen"></i> 参加者投稿画面
-                                    </button>
-                                </div>
-                            ) : (
+                        {/* 🎯 中央：本日のテーマ（大画面の主役・中央特大フォント・インライン編集） */}
+                        {appRole === 'board' && !isParticipantOnly ? (
+                            <div className="flex-1 flex items-center justify-center max-w-2xl mx-2">
+                                {isEditingThemeTitle ? (
+                                    <div className="flex items-center gap-2 w-full">
+                                        <input 
+                                            type="text"
+                                            value={tempThemeTitle}
+                                            onChange={(e) => setTempThemeTitle(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') handleSaveThemeTitle(tempThemeTitle);
+                                                if (e.key === 'Escape') setIsEditingThemeTitle(false);
+                                            }}
+                                            autoFocus
+                                            placeholder="例: 2026年度 新人研修 振り返りワーク"
+                                            className="bg-slate-900 text-white text-sm sm:text-base lg:text-lg font-bold border-2 border-indigo-400 rounded-xl px-3 py-1 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner"
+                                        />
+                                        <button 
+                                            onClick={() => handleSaveThemeTitle(tempThemeTitle)}
+                                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 shadow shrink-0">
+                                            <i className="fa-solid fa-check"></i> 保存
+                                        </button>
+                                        <button 
+                                            onClick={() => setIsEditingThemeTitle(false)}
+                                            className="text-slate-400 hover:text-white px-2 py-1 text-xs transition shrink-0">
+                                            取消
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div 
+                                        onClick={() => {
+                                            setTempThemeTitle(sessionThemeTitle);
+                                            setIsEditingThemeTitle(true);
+                                        }}
+                                        title="クリックしてテーマタイトルを編集"
+                                        className="group flex items-center gap-2 cursor-pointer bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-indigo-500/50 px-4 py-1 rounded-2xl transition shadow-inner max-w-full">
+                                        <span className="bg-amber-400 text-slate-950 font-black text-[10px] sm:text-xs px-2 py-0.5 rounded-md shrink-0 shadow-2xs">
+                                            🎯 テーマ
+                                        </span>
+                                        <h2 className="text-sm sm:text-base md:text-lg lg:text-xl font-black text-white group-hover:text-indigo-200 transition tracking-wide truncate">
+                                            {sessionThemeTitle}
+                                        </h2>
+                                        <i className="fa-solid fa-pen text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 group-hover:text-indigo-300 transition shrink-0"></i>
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
+
+                        {/* ➡ 右側：機能別にグループ化されたボタン群 */}
+                        <div className="flex items-center space-x-2 shrink-0">
+                            {/* 参加者専用URLアクセス時 */}
+                            {isParticipantOnly ? (
                                 <button 
                                     onClick={() => connectToHost()}
                                     title={peerConnected ? "講師ボードとP2P接続中" : "タップして再接続を試行"}
@@ -1210,75 +1242,84 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     <span className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
                                     <span>{peerConnected ? 'ボード接続中' : '待機中 (タップ再接続)'}</span>
                                 </button>
-                            )}
-
-                            {appRole === 'board' && !isParticipantOnly && (
+                            ) : (
                                 <>
-                                    <button 
-                                        onClick={handleOpenSaveSnapshotModal}
-                                        title="現在の板書を過去の記録に保存（付箋0件でもタイトル付きで保存可能）"
-                                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
-                                        <i className="fa-solid fa-floppy-disk text-indigo-200"></i>
-                                        💾 板書を保存
-                                    </button>
+                                    {/* 1. 受講者・AIメイン操作グループ（鮮やかカラーで目立たせる） */}
+                                    <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                                        <button 
+                                            onClick={() => setShowQrModal(true)}
+                                            title="参加者用QRコード・URLを表示"
+                                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
+                                            <i className="fa-solid fa-qrcode"></i>
+                                            <span className="hidden sm:inline">参加者QR</span>
+                                        </button>
 
-                                    <button 
-                                        onClick={handleOpenNewBoardModal}
-                                        title="現在の板書を保存して新しい板書を開始"
-                                        className="bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
-                                        <i className="fa-solid fa-folder-plus text-amber-300"></i>
-                                        ✨ 新しい板書
-                                    </button>
+                                        <button 
+                                            onClick={handleAiCluster}
+                                            disabled={isAiProcessing}
+                                            title="Gemini AIで意見を自動分類・要約"
+                                            className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95 disabled:opacity-50">
+                                            <i className={`fa-solid ${isAiProcessing ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'} text-amber-300`}></i>
+                                            <span>{isAiProcessing ? 'AI整理中...' : 'AI整理'}</span>
+                                        </button>
+                                    </div>
 
-                                    <button 
-                                        onClick={() => setShowArchiveModal(true)}
-                                        title="過去の板書アーカイブ一覧を表示・復元"
-                                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
-                                        <i className="fa-solid fa-box-archive text-indigo-400"></i>
-                                        📚 過去の記録
-                                        <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
-                                            {archives.length}
-                                        </span>
-                                    </button>
+                                    {/* 2. 板書データ管理グループ */}
+                                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                                        <button 
+                                            onClick={handleOpenSaveSnapshotModal}
+                                            title="現在の板書を過去の記録に保存（付箋0件でもタイトル付きで保存可能）"
+                                            className="bg-indigo-700 hover:bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
+                                            <i className="fa-solid fa-floppy-disk text-indigo-200"></i>
+                                            <span className="hidden md:inline">保存</span>
+                                        </button>
 
-                                    <button 
-                                        onClick={() => setShowQrModal(true)}
-                                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition">
-                                        <i className="fa-solid fa-qrcode"></i>
-                                        📱 参加者用画面 / QR
-                                    </button>
+                                        <button 
+                                            onClick={() => setShowArchiveModal(true)}
+                                            title="過去の板書アーカイブ一覧を表示・復元"
+                                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+                                            <i className="fa-solid fa-box-archive text-indigo-400"></i>
+                                            <span className="hidden md:inline">記録</span>
+                                            <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
+                                                {archives.length}
+                                            </span>
+                                        </button>
 
-                                    <button 
-                                        onClick={handleAiCluster}
-                                        disabled={isAiProcessing}
-                                        className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold shadow-md flex items-center gap-2 transition active:scale-95 disabled:opacity-50">
-                                        <i className={`fa-solid ${isAiProcessing ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'} text-amber-300`}></i>
-                                        {isAiProcessing ? 'AI自動解析中...' : '✨ AI整理'}
-                                    </button>
+                                        <button 
+                                            onClick={handleOpenNewBoardModal}
+                                            title="現在の板書を保存して新しい板書を開始"
+                                            className="text-slate-400 hover:text-white hover:bg-slate-800 px-2 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1">
+                                            <i className="fa-solid fa-folder-plus text-amber-400"></i>
+                                            <span className="hidden lg:inline">新規</span>
+                                        </button>
+                                    </div>
 
-                                    <button 
-                                        onClick={() => setShowExportModal(true)}
-                                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
-                                        <i className="fa-solid fa-file-export text-slate-400"></i> 出力
-                                    </button>
+                                    {/* 3. 設定・その他補助グループ */}
+                                    <div className="flex items-center gap-1">
+                                        <button 
+                                            onClick={() => setShowExportModal(true)}
+                                            title="マークダウン/テキスト出力"
+                                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1.5 rounded-lg text-xs transition">
+                                            <i className="fa-solid fa-file-export"></i>
+                                        </button>
 
-                                    <button 
-                                        onClick={() => {
-                                            setConfigInputKey(geminiApiKey);
-                                            setShowConfigModal(true);
-                                        }}
-                                        title="Gemini APIキー設定"
-                                        className={`border px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition ${geminiApiKey ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-emerald-600/40' : 'bg-amber-950/80 hover:bg-amber-900 text-amber-300 border-amber-600/60'}`}>
-                                        <i className="fa-solid fa-gear"></i>
-                                        <span className="hidden sm:inline">{geminiApiKey ? 'AI設定済' : '⚙️ API設定'}</span>
-                                    </button>
+                                        <button 
+                                            onClick={() => {
+                                                setConfigInputKey(geminiApiKey);
+                                                setShowConfigModal(true);
+                                            }}
+                                            title="Gemini APIキー設定"
+                                            className={`border p-1.5 rounded-lg text-xs transition ${geminiApiKey ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-emerald-600/40' : 'bg-amber-950/80 hover:bg-amber-900 text-amber-300 border-amber-600/60'}`}>
+                                            <i className="fa-solid fa-gear"></i>
+                                        </button>
 
-                                    <button 
-                                        onClick={handleResetData}
-                                        title="データを初期状態にリセット"
-                                        className="bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-200 border border-slate-700 p-2 rounded-lg text-xs transition">
-                                        <i className="fa-solid fa-rotate-right"></i>
-                                    </button>
+                                        <button 
+                                            onClick={handleResetData}
+                                            title="データを初期状態にリセット"
+                                            className="bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-200 border border-slate-700 p-1.5 rounded-lg text-xs transition">
+                                            <i className="fa-solid fa-rotate-right"></i>
+                                        </button>
+                                    </div>
                                 </>
                             )}
                         </div>
@@ -1560,68 +1601,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     ) : (
                         /* Facilitator Board View */
                         <>
-                            {/* 🎯 今日のテーマ・プレゼンテーションステージバナー（大画面特大表示） */}
-                            <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white px-6 py-3 border-b border-indigo-500/20 flex items-center justify-between shadow-md shrink-0">
-                                <div className="flex items-center gap-3 flex-1 min-w-0 mr-4">
-                                    <span className="bg-amber-400 text-slate-950 font-black px-3 py-1 rounded-xl text-xs sm:text-sm tracking-wider shadow-md shrink-0 flex items-center gap-1.5 ring-2 ring-amber-300/40">
-                                        <i className="fa-solid fa-bullseye text-amber-900"></i> テーマ
-                                    </span>
-
-                                    {isEditingThemeTitle ? (
-                                        <div className="flex items-center gap-2 flex-1 max-w-2xl">
-                                            <input 
-                                                type="text"
-                                                value={tempThemeTitle}
-                                                onChange={(e) => setTempThemeTitle(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleSaveThemeTitle(tempThemeTitle);
-                                                    if (e.key === 'Escape') setIsEditingThemeTitle(false);
-                                                }}
-                                                autoFocus
-                                                placeholder="例: 2026年度 新人研修 振り返りワーク"
-                                                className="bg-slate-800 text-white text-base sm:text-lg lg:text-xl font-bold border-2 border-indigo-400 rounded-xl px-3.5 py-1.5 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner"
-                                            />
-                                            <button 
-                                                onClick={() => handleSaveThemeTitle(tempThemeTitle)}
-                                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 shadow-md active:scale-95">
-                                                <i className="fa-solid fa-check"></i> 保存
-                                            </button>
-                                            <button 
-                                                onClick={() => setIsEditingThemeTitle(false)}
-                                                className="text-slate-400 hover:text-white px-2.5 py-1.5 text-xs transition">
-                                                キャンセル
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <div 
-                                            onClick={() => {
-                                                setTempThemeTitle(sessionThemeTitle);
-                                                setIsEditingThemeTitle(true);
-                                            }}
-                                            title="クリックしてテーマタイトルを編集"
-                                            className="group flex items-center gap-2.5 cursor-pointer hover:bg-white/5 px-3 py-1 rounded-xl transition border border-transparent hover:border-indigo-500/30 max-w-full truncate">
-                                            <h2 className="text-base sm:text-lg md:text-xl lg:text-2xl font-black text-white group-hover:text-indigo-200 transition tracking-wide truncate drop-shadow-sm">
-                                                {sessionThemeTitle}
-                                            </h2>
-                                            <i className="fa-solid fa-pen text-xs text-slate-500 opacity-0 group-hover:opacity-100 group-hover:text-indigo-300 transition shrink-0"></i>
-                                            <span className="text-[11px] text-indigo-300/70 hidden lg:inline font-medium opacity-0 group-hover:opacity-100 transition shrink-0">(クリックで編集)</span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* リアルタイム集計バッジ */}
-                                <div className="hidden sm:flex items-center gap-2 shrink-0">
-                                    <span className="bg-slate-800/80 border border-slate-700/80 text-slate-200 text-xs px-3 py-1.5 rounded-full font-bold font-mono flex items-center gap-1.5 shadow-2xs">
-                                        <i className="fa-solid fa-note-sticky text-amber-400"></i>
-                                        <span>付箋 {cards.length} 件</span>
-                                    </span>
-                                    <span className="bg-slate-800/80 border border-slate-700/80 text-slate-200 text-xs px-3 py-1.5 rounded-full font-bold font-mono flex items-center gap-1.5 shadow-2xs">
-                                        <i className="fa-solid fa-thumbs-up text-indigo-400"></i>
-                                        <span>いいね {cards.reduce((s,c) => s + (c.votes||0), 0)}</span>
-                                    </span>
-                                </div>
-                            </div>
-
                             <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 shrink-0">
                                 <form onSubmit={handleAddCard} className="flex items-center space-x-3 flex-1 max-w-4xl">
                                     <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0">
