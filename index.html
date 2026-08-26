@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.17.2)</title>
+    <title>板書・意見整理 AI (v1.17.3)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.17.2";
+        const APP_VERSION = "v1.17.3";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -2170,8 +2170,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 src={slideUrl}
                                 className="w-full h-full rounded-xl border border-slate-800 shadow-2xl bg-white"
                                 allowFullScreen={true}
-                                mozallowfullscreen="true"
-                                webkitallowfullscreen="true"
                                 frameBorder="0"
                             ></iframe>
                         ) : (
@@ -2331,110 +2329,37 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             </div>
                         </div>
                     ) : (
-                                                            onDelete={handleDeleteCategory}
-                                                            onSort={handleSortCategoryCards}
-                                                        />
-
-                                                        {summaries[cat.id] && (
-                                                            <div className="mx-3 mt-3 p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-xs text-indigo-900 flex items-start gap-2 shadow-inner">
-                                                                <i className="fa-solid fa-wand-magic-sparkles text-indigo-500 mt-0.5 shrink-0"></i>
-                                                                <div>
-                                                                    <span className="font-bold block mb-0.5 text-[11px] text-indigo-700">AI要約:</span>
-                                                                    <p className="leading-relaxed text-[11px]">{summaries[cat.id]}</p>
-                                                                </div>
-                                                            </div>
-                                                        )}
-
-                                                        <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[150px]">
-                                                            {catCards.length === 0 ? (
-                                                                <div className="h-32 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 text-xs">
-                                                                    ここにカードをドラッグ
-                                                                </div>
-                                                            ) : (
-                                                                catCards.map(card => (
-                                                                    <StickyCard 
-                                                                        key={card.id} 
-                                                                        card={card} 
-                                                                        onDragStart={handleDragStart}
-                                                                        onCardDrop={handleCardDrop}
-                                                                        onVote={handleVote}
-                                                                        onDelete={handleDeleteCard}
-                                                                        onUpdateText={handleUpdateCardText}
-                                                                        onChangeLevel={handleChangeCardLevel}
-                                                                        onChangeColor={handleChangeCardColor}
-                                                                    />
-                                                                ))
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-
-                                            <div className="w-72 shrink-0">
-                                                {isAddingCategory ? (
-                                                    <div className="bg-white p-4 rounded-2xl border border-slate-300 shadow-sm">
-                                                        <h4 className="text-xs font-bold text-slate-600 mb-2">新しいグループを作成</h4>
-                                                        <input 
-                                                            type="text"
-                                                            value={newCategoryTitle}
-                                                            onChange={(e) => setNewCategoryTitle(e.target.value)}
-                                                            placeholder="例: 🚀 施策アイデア"
-                                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
-                                                            autoFocus
-                                                        />
-                                                        <div className="flex justify-end gap-2">
-                                                            <button 
-                                                                onClick={() => setIsAddingCategory(false)}
-                                                                className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">
-                                                                キャンセル
-                                                            </button>
-                                                            <button 
-                                                                onClick={handleAddCategory}
-                                                                className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg">
-                                                                作成
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <button 
-                                                        onClick={() => setIsAddingCategory(true)}
-                                                        className="w-full h-14 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 rounded-2xl flex items-center justify-center text-slate-500 hover:text-indigo-600 font-medium text-sm transition gap-2">
-                                                        <i className="fa-solid fa-plus"></i> 新しいグループ枠を追加
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                            {cards.map(card => {
-                                                const category = categories.find(c => c.id === card.categoryId);
-                                                return (
-                                                    <div key={card.id} className="relative">
-                                                        {category && (
-                                                            <span className="inline-block mb-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-white">
-                                                                {category.title}
-                                                            </span>
-                                                        )}
-                                                        <StickyCard 
-                                                            card={card} 
-                                                            onDragStart={handleDragStart}
-                                                            onVote={handleVote}
-                                                            onDelete={handleDeleteCard}
-                                                            onUpdateText={handleUpdateCardText}
-                                                            onChangeLevel={handleChangeCardLevel}
-                                                            onChangeColor={handleChangeCardColor}
-                                                        />
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </>
+                        /* Free view - all cards in a grid */
+                        <div className="flex-1 overflow-y-auto p-6 bg-slate-100/60 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 auto-rows-max">
+                            {cards.map(card => {
+                                const category = categories.find(c => c.id === card.categoryId);
+                                return (
+                                    <div key={card.id} className="flex flex-col">
+                                        {category && (
+                                            <span className="inline-block mb-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-white">
+                                                {category.title}
+                                            </span>
+                                        )}
+                                        <StickyCard 
+                                            card={card} 
+                                            onDragStart={handleDragStart}
+                                            onVote={handleVote}
+                                            onDelete={handleDeleteCard}
+                                            onUpdateText={handleUpdateCardText}
+                                            onChangeLevel={handleChangeCardLevel}
+                                            onChangeColor={handleChangeCardColor}
+                                        />
+                                    </div>
+                                );
+                            })}
+                        </div>
                     )}
+                </div>
+            )}
+        </>
+    )}
 
-                    {/* QR Modal */}
+    {/* QR Modal */}
                     {showQrModal && (
                         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-center">
@@ -2846,6 +2771,10 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         )}
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* ⚙️ Gemini API 設定モーダル */}
                     {showConfigModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
