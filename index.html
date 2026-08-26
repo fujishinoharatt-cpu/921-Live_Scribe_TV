@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.17.3)</title>
+    <title>板書・意見整理 AI (v1.17.4)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.17.3";
+        const APP_VERSION = "v1.17.4";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -548,6 +548,14 @@
                         setPeerConnected(true);
                         conn.send({ type: 'REQUEST_SYNC' });
                     });
+                    conn.on('close', () => {
+                        console.log('Host connection closed. Retrying...');
+                        setPeerConnected(false);
+                    });
+                    conn.on('error', (err) => {
+                        console.warn('Host connection error:', err);
+                        setPeerConnected(false);
+                    });
                     conn.on('data', (data) => {
                         if (data && data.type === 'SYNC_CARDS') {
                             setCards(data.cards);
@@ -612,6 +620,17 @@
                     console.error('Failed to connect to host:', err);
                 }
             };
+
+            // 参加者専用：未接続時の自動リトライ（4秒間隔でバックグラウンド接続試行）
+            useEffect(() => {
+                if (appRole !== 'participant') return;
+                const interval = setInterval(() => {
+                    if (!peerConnected && peerRef.current && !peerRef.current.destroyed) {
+                        connectToHost();
+                    }
+                }, 4000);
+                return () => clearInterval(interval);
+            }, [appRole, peerConnected]);
 
             // P2P確実送信ヘルパー（切断時は自動再接続）
             const sendP2pMessage = (payload, onComplete) => {
