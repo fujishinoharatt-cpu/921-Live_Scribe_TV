@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.7.3)</title>
+    <title>板書・意見整理 AI (v1.8.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -53,7 +53,28 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.7.3";
+        const APP_VERSION = "v1.8.0";
+
+        // 付箋カラーパレット定義
+        const COLOR_PALETTE = [
+            { id: 'sticky-yellow', bg: 'bg-yellow-300', dot: 'bg-yellow-400', name: 'イエロー' },
+            { id: 'sticky-green',  bg: 'bg-emerald-300', dot: 'bg-emerald-400', name: 'グリーン' },
+            { id: 'sticky-blue',   bg: 'bg-sky-300',     dot: 'bg-sky-400',     name: 'ブルー' },
+            { id: 'sticky-pink',   bg: 'bg-pink-300',    dot: 'bg-pink-400',    name: 'ピンク' },
+            { id: 'sticky-purple', bg: 'bg-purple-300',  dot: 'bg-purple-400',  name: 'パープル' }
+        ];
+
+        // 投稿者名から自動でカラーを算出するハッシュ関数（方式A: 投稿者とカラーの自動連動）
+        const getColorByName = (name) => {
+            if (!name || !name.trim()) return 'sticky-yellow';
+            let hash = 0;
+            const str = name.trim();
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const index = Math.abs(hash) % COLOR_PALETTE.length;
+            return COLOR_PALETTE[index].id;
+        };
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -124,7 +145,18 @@
                 return localStorage.getItem('bansho_my_name') || '';
             });
             const [inputText, setInputText] = useState('');
-            const [selectedColor, setSelectedColor] = useState('sticky-yellow');
+            const [selectedColor, setSelectedColor] = useState(() => {
+                const savedName = localStorage.getItem('bansho_my_name') || '';
+                return getColorByName(savedName);
+            });
+
+            // お名前入力時に付箋カラーを自動連動更新（方式A）
+            const handleParticipantNameChange = (name) => {
+                setParticipantName(name);
+                if (name.trim()) {
+                    setSelectedColor(getColorByName(name));
+                }
+            };
             const [draggedCardId, setDraggedCardId] = useState(null);
             const [viewMode, setViewMode] = useState('kanban');
             const [isAiProcessing, setIsAiProcessing] = useState(false);
@@ -1253,28 +1285,29 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         {/* 📝 下部：投稿フォームカード（常時画面内に固定） */}
                                         <div className="bg-white rounded-2xl p-3 shadow-2xl border border-slate-100 shrink-0">
                                             <form onSubmit={handleAddCard} className="space-y-2">
-                                                {/* 名前 & カラー選択（1行に集約） */}
+                                                {/* 名前 & カラー選択（方式A: 名前から自動色決定 ＋ 手動変更可能） */}
                                                 <div className="flex items-center gap-2">
-                                                    <input 
-                                                        type="text"
-                                                        value={participantName}
-                                                        onChange={(e) => setParticipantName(e.target.value)}
-                                                        placeholder="名前 (任意)"
-                                                        className="w-28 sm:w-32 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none shrink-0"
-                                                    />
+                                                    <div className="relative w-28 sm:w-32 shrink-0">
+                                                        <input 
+                                                            type="text"
+                                                            value={participantName}
+                                                            onChange={(e) => handleParticipantNameChange(e.target.value)}
+                                                            placeholder="名前 (自動色分け)"
+                                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none pr-5 font-bold"
+                                                        />
+                                                        <span 
+                                                            title="お名前に連動した付箋カラー"
+                                                            className={`absolute right-2 top-2.5 w-2.5 h-2.5 rounded-full ${COLOR_PALETTE.find(c => c.id === selectedColor)?.bg || 'bg-yellow-300'} ring-1 ring-slate-400 shadow-2xs`}>
+                                                        </span>
+                                                    </div>
                                                     <div className="flex-1 flex items-center space-x-1 bg-slate-100 p-1 rounded-lg">
-                                                        {[
-                                                            { id: 'sticky-yellow', bg: 'bg-yellow-300' },
-                                                            { id: 'sticky-green', bg: 'bg-emerald-300' },
-                                                            { id: 'sticky-blue', bg: 'bg-sky-300' },
-                                                            { id: 'sticky-pink', bg: 'bg-pink-300' },
-                                                            { id: 'sticky-purple', bg: 'bg-purple-300' }
-                                                        ].map(color => (
+                                                        {COLOR_PALETTE.map(color => (
                                                             <button
                                                                 key={color.id}
                                                                 type="button"
                                                                 onClick={() => setSelectedColor(color.id)}
-                                                                className={`flex-1 h-6 rounded ${color.bg} flex items-center justify-center font-bold text-[10px] transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-60 hover:opacity-100'}`}>
+                                                                title={`付箋カラー: ${color.name}`}
+                                                                className={`flex-1 h-6 rounded ${color.bg} flex items-center justify-center font-bold text-[10px] transition ${selectedColor === color.id ? 'ring-2 ring-slate-800 scale-105 shadow' : 'opacity-50 hover:opacity-90'}`}>
                                                                 {selectedColor === color.id && '✓'}
                                                             </button>
                                                         ))}
@@ -1365,8 +1398,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                                 {/* 上段ヘッダー：名前・時間・カテゴリ ＋ 【いいねボタンを同列配置】 */}
                                                                 <div className="flex items-center justify-between gap-1.5 mb-1">
                                                                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                                                        <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1 shrink-0">
-                                                                            <span>👤 {card.author || '受講者'}</span>
+                                                                        <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1.5 shrink-0">
+                                                                            <span className={`w-2 h-2 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/20 shrink-0`}></span>
+                                                                            <span>{card.author || '受講者'}</span>
                                                                             {isMyCard && (
                                                                                 <span className="bg-indigo-600 text-white text-[8px] px-1 rounded font-bold">あなた</span>
                                                                             )}
@@ -2114,9 +2148,13 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     
                     {card.author && (
                         <div className="mb-1.5 flex items-center justify-between">
-                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md">
-                                👤 {card.author}
+                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/20 shrink-0`}></span>
+                                <span>{card.author}</span>
                             </span>
+                            {card.createdAt && (
+                                <span className="text-[9px] text-black/50 font-mono">🕒 {card.createdAt}</span>
+                            )}
                         </div>
                     )}
 
