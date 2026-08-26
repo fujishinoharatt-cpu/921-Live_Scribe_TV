@@ -43,6 +43,8 @@
         .sticky-orange { background-color: #fed7aa; border-color: #fdba74; color: #7c2d12; }
         .sticky-cyan   { background-color: #a5f3fc; border-color: #67e8f9; color: #164e63; }
         .sticky-lime   { background-color: #d9f99d; border-color: #bef264; color: #365314; }
+        .sticky-gray   { background-color: #e2e8f0; border-color: #cbd5e1; color: #1e293b; }
+        .sticky-white  { background-color: #ffffff; border-color: #e2e8f0; color: #0f172a; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -56,9 +58,9 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.14.2";
+        const APP_VERSION = "v1.15.0";
 
-        // 付箋カラーパレット定義（番号①〜⑧付き・班別手動選択対応）
+        // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
             { num: 1, numLabel: '①', id: 'sticky-yellow', bg: 'bg-yellow-300', dot: 'bg-yellow-400', name: 'イエロー (1班)', text: 'text-amber-950' },
             { num: 2, numLabel: '②', id: 'sticky-green',  bg: 'bg-emerald-300', dot: 'bg-emerald-400', name: 'グリーン (2班)', text: 'text-emerald-950' },
@@ -67,7 +69,9 @@
             { num: 5, numLabel: '⑤', id: 'sticky-orange', bg: 'bg-orange-300',  dot: 'bg-orange-400',  name: 'オレンジ (5班)', text: 'text-orange-950' },
             { num: 6, numLabel: '⑥', id: 'sticky-pink',   bg: 'bg-pink-300',    dot: 'bg-pink-400',    name: 'ピンク (6班)',   text: 'text-pink-950' },
             { num: 7, numLabel: '⑦', id: 'sticky-cyan',   bg: 'bg-cyan-300',    dot: 'bg-cyan-400',    name: 'シアン (7班)',   text: 'text-cyan-950' },
-            { num: 8, numLabel: '⑧', id: 'sticky-lime',   bg: 'bg-lime-300',    dot: 'bg-lime-400',    name: 'ライム (8班)',   text: 'text-lime-950' }
+            { num: 8, numLabel: '⑧', id: 'sticky-lime',   bg: 'bg-lime-300',    dot: 'bg-lime-400',    name: 'ライム (8班)',   text: 'text-lime-950' },
+            { num: 9, numLabel: '🩶', id: 'sticky-gray',   bg: 'bg-slate-300',   dot: 'bg-slate-400',   name: 'グレー (中項目・見出し用)', text: 'text-slate-800' },
+            { num: 10, numLabel: '🤍', id: 'sticky-white',  bg: 'bg-white border border-slate-300', dot: 'bg-slate-200', name: 'ホワイト (シンプル・メモ用)', text: 'text-slate-800' }
         ];
 
         // 動物アバター一覧（名前から自動決定）
@@ -2509,8 +2513,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             )}
                         </div>
 
-                        {/* アクションボタン群（階層変更・色変更・いいね・削除） */}
-                        <div className="flex items-center gap-0.5 shrink-0">
+                        {/* アクションボタン群（階層変更・いいね・削除） */}
+                        <div className="flex items-center gap-1 shrink-0">
                             {/* 階層変更ボタン（ホバー時・または階層設定時に表示） */}
                             {onChangeLevel && (
                                 <div className="flex items-center gap-0.5 opacity-40 group-hover:opacity-100 transition bg-white/60 rounded-lg p-0.5 border border-black/5">
@@ -2537,19 +2541,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         </button>
                                     )}
                                 </div>
-                            )}
-
-                            {/* 🎨 カードカラー変更ボタン（クリックでパレット開閉） */}
-                            {onChangeColor && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setShowColorPicker(!showColorPicker);
-                                    }}
-                                    title="🎨 付箋カラーを変更（①〜⑧）"
-                                    className={`w-5 h-5 rounded-lg flex items-center justify-center text-[10px] transition border cursor-pointer ${showColorPicker ? 'bg-slate-900 text-amber-300 border-slate-900 shadow-sm scale-105' : 'opacity-60 group-hover:opacity-100 hover:bg-white text-slate-700 hover:text-amber-600 bg-white/60 border-black/5'}`}>
-                                    <i className="fa-solid fa-palette"></i>
-                                </button>
                             )}
 
                             {/* いいねボタン */}
