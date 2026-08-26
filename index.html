@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.14.1)</title>
+    <title>板書・意見整理 AI (v1.14.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.14.1";
+        const APP_VERSION = "v1.14.2";
 
         // 付箋カラーパレット定義（番号①〜⑧付き・班別手動選択対応）
         const COLOR_PALETTE = [
@@ -2475,35 +2475,45 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     className={`sticky-card ${card.color} ${indentClass} p-3 rounded-2xl border cursor-grab active:cursor-grabbing relative group transition-all duration-150 ${isDragOver ? 'ring-2 ring-indigo-500 scale-[1.02] shadow-lg border-indigo-400' : ''}`}>
                     
                     {/* 上段ヘッダー：名前・階層インジケータ ＋ 【階層調整・色変更・いいね・削除】 */}
-                    <div className="mb-2 flex items-center justify-between gap-1.5">
-                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                    <div className="mb-2 flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
                             {/* 階層バッジ（中・小の場合に表示） */}
                             {level === 1 && (
-                                <span className="text-[9px] font-black bg-amber-500/20 text-amber-900 px-1.5 py-0.2 rounded font-mono shrink-0" title="第2階層（中項目）">
+                                <span className="text-[9px] font-black bg-amber-500/20 text-amber-900 px-1 py-0.2 rounded font-mono shrink-0" title="第2階層（中項目）">
                                     ↳ 中
                                 </span>
                             )}
                             {level === 2 && (
-                                <span className="text-[9px] font-black bg-indigo-500/20 text-indigo-900 px-1.5 py-0.2 rounded font-mono shrink-0" title="第3階層（小項目・具体）">
+                                <span className="text-[9px] font-black bg-indigo-500/20 text-indigo-900 px-1 py-0.2 rounded font-mono shrink-0" title="第3階層（小項目・具体）">
                                     ↳↳ 小
                                 </span>
                             )}
 
-                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1.5 shadow-2xs shrink-0">
-                                <span className={`w-2 h-2 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/20 shrink-0`}></span>
+                            <div className="text-[10px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-2xs shrink-0">
+                                {/* ● カラー丸をクリックしても色パレットが開く */}
+                                <button 
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onChangeColor) setShowColorPicker(!showColorPicker);
+                                    }}
+                                    title="クリックして付箋の色を変更"
+                                    className="flex items-center cursor-pointer hover:scale-125 transition">
+                                    <span className={`w-2.5 h-2.5 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/30 shadow-xs`}></span>
+                                </button>
                                 <span className="text-xs">{getAvatarByName(card.author)}</span>
-                                <span className="truncate max-w-[80px]">{card.author || '受講者'}</span>
-                            </span>
+                                <span className="truncate max-w-[65px]">{card.author || '受講者'}</span>
+                            </div>
                             {card.createdAt && (
                                 <span className="text-[9px] text-black/50 font-mono shrink-0">🕒 {card.createdAt}</span>
                             )}
                         </div>
 
                         {/* アクションボタン群（階層変更・色変更・いいね・削除） */}
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-0.5 shrink-0">
                             {/* 階層変更ボタン（ホバー時・または階層設定時に表示） */}
                             {onChangeLevel && (
-                                <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition bg-white/60 rounded-lg p-0.5 border border-black/5">
+                                <div className="flex items-center gap-0.5 opacity-40 group-hover:opacity-100 transition bg-white/60 rounded-lg p-0.5 border border-black/5">
                                     {level > 0 && (
                                         <button 
                                             onClick={(e) => {
@@ -2536,8 +2546,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         e.stopPropagation();
                                         setShowColorPicker(!showColorPicker);
                                     }}
-                                    title="付箋の色を変更（中項目の色分けなど）"
-                                    className="opacity-30 group-hover:opacity-100 hover:bg-white text-slate-700 hover:text-amber-600 w-5 h-5 rounded-lg flex items-center justify-center text-[10px] transition bg-white/60 border border-black/5 cursor-pointer">
+                                    title="🎨 付箋カラーを変更（①〜⑧）"
+                                    className={`w-5 h-5 rounded-lg flex items-center justify-center text-[10px] transition border cursor-pointer ${showColorPicker ? 'bg-slate-900 text-amber-300 border-slate-900 shadow-sm scale-105' : 'opacity-60 group-hover:opacity-100 hover:bg-white text-slate-700 hover:text-amber-600 bg-white/60 border-black/5'}`}>
                                     <i className="fa-solid fa-palette"></i>
                                 </button>
                             )}
@@ -2549,7 +2559,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     onVote(card.id);
                                 }}
                                 title="いいね！"
-                                className="flex items-center gap-1 hover:scale-110 transition active:scale-95 bg-white/70 hover:bg-white px-2 py-0.5 rounded-full text-slate-800 font-bold text-[11px] shadow-2xs cursor-pointer border border-black/5">
+                                className="flex items-center gap-1 hover:scale-110 transition active:scale-95 bg-white/70 hover:bg-white px-1.5 py-0.5 rounded-full text-slate-800 font-bold text-[11px] shadow-2xs cursor-pointer border border-black/5">
                                 <span>👍</span>
                                 <span className="font-mono text-xs">{card.votes || 0}</span>
                             </button>
@@ -2571,7 +2581,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {showColorPicker && onChangeColor && (
                         <div 
                             onClick={(e) => e.stopPropagation()}
-                            className="mb-2 p-1.5 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200 flex items-center justify-between gap-1 animate-in fade-in zoom-in duration-100">
+                            className="mb-2 p-1.5 bg-white rounded-xl shadow-xl border border-slate-300 flex items-center justify-between gap-1 animate-in fade-in zoom-in duration-100 ring-2 ring-indigo-400/30">
+                            <span className="text-[9px] font-bold text-slate-400 shrink-0 mr-0.5">色:</span>
                             {COLOR_PALETTE.map(color => (
                                 <button
                                     key={color.id}
@@ -2581,7 +2592,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         setShowColorPicker(false);
                                     }}
                                     title={`カラー: ${color.numLabel} ${color.name}`}
-                                    className={`w-5 h-5 rounded-md ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-[9px] transition ${card.color === color.id ? 'ring-2 ring-slate-800 scale-110' : 'hover:scale-105 opacity-70 hover:opacity-100'}`}>
+                                    className={`w-5 h-5 rounded-md ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-[9px] transition ${card.color === color.id ? 'ring-2 ring-slate-900 scale-110 shadow-sm' : 'hover:scale-105 opacity-70 hover:opacity-100'}`}>
                                     {color.numLabel}
                                 </button>
                             ))}
