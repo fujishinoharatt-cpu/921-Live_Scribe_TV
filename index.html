@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.13.1)</title>
+    <title>板書・意見整理 AI (v1.14.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.13.1";
+        const APP_VERSION = "v1.14.0";
 
         // 付箋カラーパレット定義（番号①〜⑧付き・班別手動選択対応）
         const COLOR_PALETTE = [
@@ -903,6 +903,22 @@
                 setCards(cards.map(c => c.id === cardId ? { ...c, votes: c.votes + 1 } : c));
             };
 
+            // 🏷️ 付箋の階層（level: 0=親・大項目, 1=中項目, 2=小項目）を変更
+            const handleChangeCardLevel = (cardId, delta) => {
+                setCards(prevCards => {
+                    const nextCards = prevCards.map(c => {
+                        if (c.id === cardId) {
+                            const currentLevel = c.level || 0;
+                            const newLevel = Math.max(0, Math.min(2, currentLevel + delta));
+                            return { ...c, level: newLevel };
+                        }
+                        return c;
+                    });
+                    broadcastToClients({ type: 'SYNC_CARDS', cards: nextCards, themeTitle: sessionThemeTitleRef.current });
+                    return nextCards;
+                });
+            };
+
             const handleDeleteCard = (cardId) => {
                 setCards(cards.filter(c => c.id !== cardId));
             };
@@ -1154,7 +1170,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         md += `*(意見なし)*\n\n`;
                     } else {
                         catCards.forEach(c => {
-                            md += `- ${c.text} (by ${c.author || '匿名'}, 👍 ${c.votes})\n`;
+                            const level = c.level || 0;
+                            const prefix = level === 2 ? '    - ↳↳ ' : (level === 1 ? '  - ↳ ' : '- ');
+                            md += `${prefix}${c.text} (by ${c.author || '匿名'}, 👍 ${c.votes || 0})\n`;
                         });
                         md += `\n`;
                     }
@@ -1558,15 +1576,27 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                         const isMyCard = myHistory.some(h => h.id === card.id);
                                                         const isVoted = !!myVotes[card.id];
                                                         const cat = categories.find(c => c.id === card.categoryId);
+                                                        const level = card.level || 0;
+                                                        const mobileIndent = level === 2 ? 'ml-4 border-l-4 border-l-indigo-400 pl-1.5' : (level === 1 ? 'ml-2 border-l-4 border-l-amber-400 pl-1.5' : '');
 
                                                         return (
                                                             <div 
                                                                 key={card.id} 
-                                                                className={`${card.color} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
+                                                                className={`${card.color} ${mobileIndent} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
                                                                 
                                                                 {/* 上段ヘッダー：名前・時間・カテゴリ ＋ 【いいねボタンを同列配置】 */}
                                                                 <div className="flex items-center justify-between gap-1.5 mb-1">
                                                                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                                                        {level === 1 && (
+                                                                            <span className="text-[8px] font-black bg-amber-500/20 text-amber-900 px-1 py-0.2 rounded font-mono">
+                                                                                ↳
+                                                                            </span>
+                                                                        )}
+                                                                        {level === 2 && (
+                                                                            <span className="text-[8px] font-black bg-indigo-500/20 text-indigo-900 px-1 py-0.2 rounded font-mono">
+                                                                                ↳↳
+                                                                            </span>
+                                                                        )}
                                                                         <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1 shrink-0">
                                                                             <span className={`w-2 h-2 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/20 shrink-0`}></span>
                                                                             <span className="text-[11px]">{getAvatarByName(card.author)}</span>
@@ -1702,6 +1732,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                     onVote={handleVote}
                                                     onDelete={handleDeleteCard}
                                                     onUpdateText={handleUpdateCardText}
+                                                    onChangeLevel={handleChangeCardLevel}
                                                 />
                                             ))
                                         )}
@@ -1754,6 +1785,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                                         onVote={handleVote}
                                                                         onDelete={handleDeleteCard}
                                                                         onUpdateText={handleUpdateCardText}
+                                                                        onChangeLevel={handleChangeCardLevel}
                                                                     />
                                                                 ))
                                                             )}
@@ -1813,6 +1845,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             onVote={handleVote}
                                                             onDelete={handleDeleteCard}
                                                             onUpdateText={handleUpdateCardText}
+                                                            onChangeLevel={handleChangeCardLevel}
                                                         />
                                                     </div>
                                                 );
@@ -2337,7 +2370,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
             );
         }
 
-        function StickyCard({ card, onDragStart, onCardDrop, onVote, onDelete, onUpdateText }) {
+        function StickyCard({ card, onDragStart, onCardDrop, onVote, onDelete, onUpdateText, onChangeLevel }) {
             const [isEditing, setIsEditing] = useState(false);
             const [text, setText] = useState(card.text);
             const [isDragOver, setIsDragOver] = useState(false);
@@ -2353,6 +2386,15 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                 setIsEditing(false);
             };
 
+            const level = card.level || 0; // 0=親・大項目, 1=中項目, 2=小項目・具体例
+
+            // 3段階のインデントスタイルと左側のツリー分岐バー
+            const indentClass = level === 2 
+                ? 'ml-6 border-l-4 border-l-indigo-400 pl-2 shadow-sm' 
+                : (level === 1 
+                    ? 'ml-3 border-l-4 border-l-amber-400 pl-2 shadow-sm' 
+                    : 'ml-0 border-l-4 border-l-transparent');
+
             return (
                 <div 
                     draggable={!isEditing}
@@ -2366,23 +2408,64 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         setIsDragOver(false);
                         if (onCardDrop) onCardDrop(e, card.id, card.categoryId);
                     }}
-                    className={`sticky-card ${card.color} p-3.5 rounded-2xl border cursor-grab active:cursor-grabbing relative group transition ${isDragOver ? 'ring-2 ring-indigo-500 scale-[1.02] shadow-lg border-indigo-400' : ''}`}>
+                    className={`sticky-card ${card.color} ${indentClass} p-3 rounded-2xl border cursor-grab active:cursor-grabbing relative group transition-all duration-150 ${isDragOver ? 'ring-2 ring-indigo-500 scale-[1.02] shadow-lg border-indigo-400' : ''}`}>
                     
-                    {/* 上段ヘッダー：名前・動物アバター・時間 ＋ 【👍 いいねボタン & 削除ボタン】を同列配置 */}
+                    {/* 上段ヘッダー：名前・階層インジケータ ＋ 【階層調整ボタン ＆ いいね ＆ 削除】 */}
                     <div className="mb-2 flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                            {/* 階層バッジ（中・小の場合に表示） */}
+                            {level === 1 && (
+                                <span className="text-[9px] font-black bg-amber-500/20 text-amber-900 px-1.5 py-0.2 rounded font-mono shrink-0" title="第2階層（中項目）">
+                                    ↳ 中
+                                </span>
+                            )}
+                            {level === 2 && (
+                                <span className="text-[9px] font-black bg-indigo-500/20 text-indigo-900 px-1.5 py-0.2 rounded font-mono shrink-0" title="第3階層（小項目・具体）">
+                                    ↳↳ 小
+                                </span>
+                            )}
+
                             <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1.5 shadow-2xs shrink-0">
                                 <span className={`w-2 h-2 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/20 shrink-0`}></span>
                                 <span className="text-xs">{getAvatarByName(card.author)}</span>
-                                <span className="truncate max-w-[90px]">{card.author || '受講者'}</span>
+                                <span className="truncate max-w-[80px]">{card.author || '受講者'}</span>
                             </span>
                             {card.createdAt && (
                                 <span className="text-[9px] text-black/50 font-mono shrink-0">🕒 {card.createdAt}</span>
                             )}
                         </div>
 
-                        {/* いいねボタン ＆ 削除ボタン（名前行の右端にすっきり配置） */}
+                        {/* アクションボタン群（階層変更・いいね・削除） */}
                         <div className="flex items-center gap-1 shrink-0">
+                            {/* 階層変更ボタン（ホバー時・または階層設定時に表示） */}
+                            {onChangeLevel && (
+                                <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition bg-white/60 rounded-lg p-0.5 border border-black/5">
+                                    {level > 0 && (
+                                        <button 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onChangeLevel(card.id, -1);
+                                            }}
+                                            title="↰ 階層を上げる（親に近づける）"
+                                            className="hover:bg-white text-slate-700 hover:text-indigo-600 w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold transition cursor-pointer">
+                                            ↰
+                                        </button>
+                                    )}
+                                    {level < 2 && (
+                                        <button 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onChangeLevel(card.id, 1);
+                                            }}
+                                            title="↳ 階層を下げる（子・具体例にする）"
+                                            className="hover:bg-white text-slate-700 hover:text-indigo-600 w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold transition cursor-pointer">
+                                            ↳
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* いいねボタン */}
                             <button 
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -2394,6 +2477,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 <span className="font-mono text-xs">{card.votes || 0}</span>
                             </button>
 
+                            {/* 削除ボタン */}
                             <button 
                                 onClick={(e) => {
                                     e.stopPropagation();
