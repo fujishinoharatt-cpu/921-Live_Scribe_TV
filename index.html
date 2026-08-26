@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.19.0)</title>
+    <title>研修ワークナビ AI (v1.19.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.19.0";
+        const APP_VERSION = "v1.19.1";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -112,6 +112,18 @@
             }
             const index = Math.abs(hash) % COLOR_PALETTE.length;
             return COLOR_PALETTE[index].id;
+        };
+
+        // お名前からアバター絵文字を決定するヘルパー
+        const AVATAR_LIST = ['🐱', '🐶', '🐰', '🐼', '🦊', '🦁', '🐻', '🐨', '🐯', '🐵', '🐮', '🐥'];
+        const getAvatarByName = (name) => {
+            if (!name || !name.trim()) return '👤';
+            let hash = 0;
+            const str = name.trim();
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            return AVATAR_LIST[Math.abs(hash) % AVATAR_LIST.length];
         };
 
         // GoogleスライドURLまたはWeb/PDF URLを埋め込み用URLに自動変換するヘルパー
@@ -163,6 +175,7 @@
 
             const [activeRoomId, setActiveRoomId] = useState(isParticipantOnly ? targetRoomParam : getInitialHostRoomId());
             const [connectedCount, setConnectedCount] = useState(0);
+            const [peerConnected, setPeerConnected] = useState(false);
 
             // 画面サイズ判定（スマホ < 768px <= 一般PC）
             const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false);
@@ -175,6 +188,24 @@
             }, []);
 
             const [appRole, setAppRole] = useState(initialRole);
+
+            // 参加者お名前変更ハンドラ
+            const handleParticipantNameChange = (val) => {
+                setParticipantName(val);
+                localStorage.setItem('bansho_my_name', val);
+            };
+
+            // ホスト・MQTT再接続ハンドラ
+            const connectToHost = () => {
+                if (mqttClientRef.current) {
+                    try {
+                        mqttClientRef.current.reconnect();
+                        showToast('🔄 ボードへ再接続を試行中...');
+                    } catch (e) {
+                        console.warn(e);
+                    }
+                }
+            };
 
             // 板書・ワークショップのテーマタイトル
             const [sessionThemeTitle, setSessionThemeTitle] = useState(() => {
@@ -1008,6 +1039,10 @@
 
                 setInputText('');
                 showToast('意見を送信しました！未分類へ追加されました。');
+            };
+
+            const handleSendParticipantCard = (e) => {
+                handleAddCard(e);
             };
 
             // 送信取り消し（講師ボードからも連動削除）
