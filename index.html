@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.14.2)</title>
+    <title>板書・意見整理 AI (v1.16.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -58,7 +58,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.15.0";
+        const APP_VERSION = "v1.16.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -218,11 +218,145 @@
             const [toastMessage, setToastMessage] = useState(null);
             const [peerConnected, setPeerConnected] = useState(false);
 
+            // ⏱️ 研修用タイマー & 🔒 投稿受付ロックの State
+            const [timerSeconds, setTimerSeconds] = useState(0); // 残り秒数
+            const [timerTotal, setTimerTotal] = useState(0);     // 設定総秒数
+            const [isTimerRunning, setIsTimerRunning] = useState(false);
+            const [isTimeUp, setIsTimeUp] = useState(false);
+            const [isSubmissionsLocked, setIsSubmissionsLocked] = useState(false); // 投稿受付ロック
+
             const peerRef = useRef(null);
             const connRef = useRef(null);
             const hostConnsRef = useRef([]); // 講師ボード接続クライアント一覧
             const sessionThemeTitleRef = useRef(sessionThemeTitle);
             const cardsRef = useRef(cards);
+            const timerSecondsRef = useRef(timerSeconds);
+            const isTimerRunningRef = useRef(isTimerRunning);
+            const timerTotalRef = useRef(timerTotal);
+            const isSubmissionsLockedRef = useRef(isSubmissionsLocked);
+
+            useEffect(() => { timerSecondsRef.current = timerSeconds; }, [timerSeconds]);
+            useEffect(() => { isTimerRunningRef.current = isTimerRunning; }, [isTimerRunning]);
+            useEffect(() => { timerTotalRef.current = timerTotal; }, [timerTotal]);
+            useEffect(() => { isSubmissionsLockedRef.current = isSubmissionsLocked; }, [isSubmissionsLocked]);
+
+            // Web Audio APIによるタイムアップ音（ベルチャイム・外部ファイル不要）
+            const playTimeUpSound = () => {
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const now = ctx.currentTime;
+                    const freqs = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+                    freqs.forEach((freq, i) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(freq, now + i * 0.18);
+                        gain.gain.setValueAtTime(0.3, now + i * 0.18);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.18 + 0.6);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + i * 0.18);
+                        osc.stop(now + i * 0.18 + 0.6);
+                    });
+                } catch (e) {
+                    console.warn('Audio context error:', e);
+                }
+            };
+
+            // タイマーのカウントダウン処理（講師側のみ動作し、受講者へブロードキャスト）
+            useEffect(() => {
+                let interval = null;
+                if (isTimerRunning && appRole === 'board') {
+                    interval = setInterval(() => {
+                        setTimerSeconds(prev => {
+                            if (prev <= 1) {
+                                setIsTimerRunning(false);
+                                setIsTimeUp(true);
+                                playTimeUpSound();
+                                broadcastToClients({ 
+                                    type: 'SYNC_TIMER', 
+                                    seconds: 0, 
+                                    total: timerTotalRef.current, 
+                                    isRunning: false, 
+                                    isTimeUp: true 
+                                });
+                                return 0;
+                            }
+                            const next = prev - 1;
+                            broadcastToClients({ 
+                                type: 'SYNC_TIMER', 
+                                seconds: next, 
+                                total: timerTotalRef.current, 
+                                isRunning: true, 
+                                isTimeUp: false 
+                            });
+                            return next;
+                        });
+                    }, 1000);
+                }
+                return () => {
+                    if (interval) clearInterval(interval);
+                };
+            }, [isTimerRunning, appRole]);
+
+            // タイマー開始・停止・リセットハンドラー
+            const handleStartTimer = (minutes) => {
+                const totalSec = minutes * 60;
+                setTimerTotal(totalSec);
+                setTimerSeconds(totalSec);
+                setIsTimerRunning(true);
+                setIsTimeUp(false);
+                broadcastToClients({ 
+                    type: 'SYNC_TIMER', 
+                    seconds: totalSec, 
+                    total: totalSec, 
+                    isRunning: true, 
+                    isTimeUp: false 
+                });
+                showToast(`⏱️ ${minutes}分タイマーを開始しました！`);
+            };
+
+            const handleToggleTimer = () => {
+                if (timerSeconds <= 0) return;
+                const nextRunning = !isTimerRunning;
+                setIsTimerRunning(nextRunning);
+                broadcastToClients({ 
+                    type: 'SYNC_TIMER', 
+                    seconds: timerSeconds, 
+                    total: timerTotal, 
+                    isRunning: nextRunning, 
+                    isTimeUp: false 
+                });
+            };
+
+            const handleResetTimer = () => {
+                setIsTimerRunning(false);
+                setTimerSeconds(0);
+                setTimerTotal(0);
+                setIsTimeUp(false);
+                broadcastToClients({ 
+                    type: 'SYNC_TIMER', 
+                    seconds: 0, 
+                    total: 0, 
+                    isRunning: false, 
+                    isTimeUp: false 
+                });
+            };
+
+            // 投稿ロック切り替えハンドラー
+            const handleToggleLock = () => {
+                const nextLocked = !isSubmissionsLocked;
+                setIsSubmissionsLocked(nextLocked);
+                broadcastToClients({ type: 'SYNC_LOCK', isLocked: nextLocked });
+                showToast(nextLocked ? '🔒 受講者の投稿受付を一時停止しました（解説モード）' : '🟢 受講者の投稿受付を再開しました！');
+            };
+
+            // 時間表示フォーマッタ（mm:ss）
+            const formatTime = (totalSeconds) => {
+                const mins = Math.floor(totalSeconds / 60);
+                const secs = totalSeconds % 60;
+                return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            };
 
             useEffect(() => {
                 sessionThemeTitleRef.current = sessionThemeTitle;
@@ -276,11 +410,17 @@
                             hostConnsRef.current.push(conn);
 
                             conn.on('open', () => {
-                                // 接続した参加者に最新の全カード一覧と現在のテーマを同期送信
+                                // 接続した参加者に最新の全カード一覧、テーマ、タイマー、ロック状態を同期送信
                                 conn.send({ 
                                     type: 'SYNC_CARDS', 
                                     cards: cardsRef.current, 
-                                    themeTitle: sessionThemeTitleRef.current 
+                                    themeTitle: sessionThemeTitleRef.current,
+                                    timer: {
+                                        seconds: timerSecondsRef.current,
+                                        total: timerTotalRef.current,
+                                        isRunning: isTimerRunningRef.current
+                                    },
+                                    isLocked: isSubmissionsLockedRef.current
                                 });
                             });
 
@@ -327,7 +467,13 @@
                                     conn.send({ 
                                         type: 'SYNC_CARDS', 
                                         cards: cardsRef.current, 
-                                        themeTitle: sessionThemeTitleRef.current 
+                                        themeTitle: sessionThemeTitleRef.current,
+                                        timer: {
+                                            seconds: timerSecondsRef.current,
+                                            total: timerTotalRef.current,
+                                            isRunning: isTimerRunningRef.current
+                                        },
+                                        isLocked: isSubmissionsLockedRef.current
                                     });
                                 }
                             });
@@ -358,6 +504,32 @@
                         if (data && data.type === 'SYNC_CARDS') {
                             setCards(data.cards);
                             if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
+                            if (data.timer) {
+                                setTimerSeconds(data.timer.seconds || 0);
+                                setTimerTotal(data.timer.total || 0);
+                                setIsTimerRunning(!!data.timer.isRunning);
+                            }
+                            if (typeof data.isLocked === 'boolean') {
+                                setIsSubmissionsLocked(data.isLocked);
+                            }
+                        } else if (data && data.type === 'SYNC_TIMER') {
+                            setTimerSeconds(data.seconds || 0);
+                            setTimerTotal(data.total || 0);
+                            setIsTimerRunning(!!data.isRunning);
+                            if (data.isTimeUp) {
+                                setIsTimeUp(true);
+                                playTimeUpSound();
+                                showToast('🔔 ワークショップの制限時間が終了しました！');
+                            } else {
+                                setIsTimeUp(false);
+                            }
+                        } else if (data && data.type === 'SYNC_LOCK') {
+                            setIsSubmissionsLocked(!!data.isLocked);
+                            if (data.isLocked) {
+                                showToast('🔒 講師により投稿受付が一時停止されました（解説モード）');
+                            } else {
+                                showToast('🟢 投稿受付が再開されました！');
+                            }
                         } else if (data && data.type === 'SYNC_THEME') {
                             if (data.themeTitle) {
                                 setSessionThemeTitle(data.themeTitle);
@@ -1301,6 +1473,50 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 </button>
                             ) : (
                                 <>
+                                    {/* 0. ⏱️ 研修進行グループ（タイマー & 投稿受付ロック） */}
+                                    <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                                        {/* タイマー表示 & コントロール */}
+                                        <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
+                                            {timerSeconds > 0 || isTimeUp ? (
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className={`font-mono font-black text-xs sm:text-sm px-1.5 py-0.2 rounded flex items-center gap-1 ${isTimeUp ? 'bg-rose-600 text-white animate-bounce' : (timerSeconds <= 30 ? 'bg-amber-500 text-slate-950 animate-pulse' : 'bg-indigo-900/80 text-indigo-200')}`}>
+                                                        <span>{isTimeUp ? '🔔 終了' : '⏱️'}</span>
+                                                        <span>{formatTime(timerSeconds)}</span>
+                                                    </span>
+                                                    <button
+                                                        onClick={handleToggleTimer}
+                                                        title={isTimerRunning ? "一時停止" : "再開"}
+                                                        className="text-slate-300 hover:text-white p-0.5 text-xs transition cursor-pointer">
+                                                        <i className={`fa-solid ${isTimerRunning ? 'fa-pause' : 'fa-play'}`}></i>
+                                                    </button>
+                                                    <button
+                                                        onClick={handleResetTimer}
+                                                        title="タイマーをリセット"
+                                                        className="text-slate-400 hover:text-rose-400 p-0.5 text-xs transition cursor-pointer">
+                                                        <i className="fa-solid fa-xmark"></i>
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-0.5">
+                                                    <span className="text-[10px] text-slate-400 font-bold mr-0.5">⏱️</span>
+                                                    <button onClick={() => handleStartTimer(1)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer">1分</button>
+                                                    <button onClick={() => handleStartTimer(3)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-indigo-300 hover:text-white bg-indigo-950/60 border border-indigo-800/40 cursor-pointer">3分</button>
+                                                    <button onClick={() => handleStartTimer(5)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer">5分</button>
+                                                    <button onClick={() => handleStartTimer(10)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer">10分</button>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* 🔒 投稿受付ロック切り替えボタン */}
+                                        <button
+                                            onClick={handleToggleLock}
+                                            title={isSubmissionsLocked ? "クリックして投稿受付を再開" : "クリックして受講者の投稿を一時停止（解説モード）"}
+                                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95 shadow-sm cursor-pointer ${isSubmissionsLocked ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse' : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-600/30'}`}>
+                                            <i className={`fa-solid ${isSubmissionsLocked ? 'fa-lock' : 'fa-lock-open'}`}></i>
+                                            <span className="hidden sm:inline">{isSubmissionsLocked ? '受付停止中' : '受付中'}</span>
+                                        </button>
+                                    </div>
+
                                     {/* 1. 受講者・AIメイン操作グループ（鮮やかカラーで目立たせる） */}
                                     <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
                                         <button 
@@ -1387,6 +1603,19 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         <div className="flex-1 bg-slate-900 p-2 sm:p-4 overflow-hidden flex flex-col items-center justify-start h-full min-h-0">
                             <div className="max-w-md w-full flex flex-col h-full min-h-0 gap-2">
                                 
+                                {/* ⏱️ リアルタイム同期タイマーバー */}
+                                {(timerSeconds > 0 || isTimeUp) && (
+                                    <div className={`px-3 py-1.5 rounded-xl border flex items-center justify-between shadow-md shrink-0 transition-all ${isTimeUp ? 'bg-rose-900/90 border-rose-500 text-white animate-bounce' : (timerSeconds <= 30 ? 'bg-amber-900/90 border-amber-500 text-amber-200 animate-pulse' : 'bg-indigo-950/90 border-indigo-500/50 text-indigo-100')}`}>
+                                        <div className="flex items-center gap-1.5 font-bold text-xs">
+                                            <span className="text-sm">{isTimeUp ? '🔔' : '⏱️'}</span>
+                                            <span>{isTimeUp ? '時間終了！' : (isTimerRunning ? '残りワーク時間' : 'タイマー一時停止中')}</span>
+                                        </div>
+                                        <span className="font-mono font-black text-sm tracking-wider bg-black/30 px-2 py-0.5 rounded-md">
+                                            {formatTime(timerSeconds)}
+                                        </span>
+                                    </div>
+                                )}
+
                                 {/* 📌 現在のテーマタイトル表示バナー */}
                                 <div className="bg-gradient-to-r from-indigo-900/90 to-slate-800/90 px-3 py-1.5 rounded-xl border border-indigo-500/30 flex items-center justify-between gap-2 shadow-xs shrink-0">
                                     <div className="flex items-center gap-1.5 min-w-0">
@@ -1395,6 +1624,11 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             {sessionThemeTitle}
                                         </h2>
                                     </div>
+                                    {isSubmissionsLocked && (
+                                        <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold shrink-0 flex items-center gap-1">
+                                            <i className="fa-solid fa-lock text-[9px]"></i> 受付停止中
+                                        </span>
+                                    )}
                                 </div>
 
                                 {/* タブ切り替えバー */}
@@ -1483,69 +1717,82 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             )}
                                         </div>
 
-                                        {/* 📝 下部：投稿フォームカード（常時画面内に固定） */}
+                                        {/* 📝 下部：投稿フォームカード（常時画面内に固定）または ロック中案内 */}
                                         <div className="bg-white rounded-2xl p-3 shadow-2xl border border-slate-100 shrink-0">
-                                            <form onSubmit={handleAddCard} className="space-y-2">
-                                                {/* 名前 & 班・カラー選択（番号①〜⑧の手動選択） */}
-                                                <div className="space-y-1.5">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="relative flex-1 flex items-center">
-                                                            <span className="absolute left-2.5 text-base select-none pointer-events-none">
-                                                                {getAvatarByName(participantName)}
-                                                            </span>
-                                                            <input 
-                                                                type="text"
-                                                                value={participantName}
-                                                                onChange={(e) => handleParticipantNameChange(e.target.value)}
-                                                                placeholder="名前・ニックネーム (任意)"
-                                                                className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none font-bold placeholder:font-normal"
-                                                            />
+                                            {isSubmissionsLocked ? (
+                                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-center">
+                                                    <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto mb-1.5 text-sm">
+                                                        <i className="fa-solid fa-lock"></i>
+                                                    </div>
+                                                    <h4 className="text-xs font-bold text-amber-900 mb-1">現在は投稿受付を一時停止しています</h4>
+                                                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                                                        講師の解説・まとめをお聞きください 🎤<br />
+                                                        （「みんなの意見」タブで閲覧・いいねは可能です）
+                                                    </p>
+                                                </div>
+                                            ) : (
+                                                <form onSubmit={handleAddCard} className="space-y-2">
+                                                    {/* 名前 & 班・カラー選択（番号①〜⑧の手動選択） */}
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="relative flex-1 flex items-center">
+                                                                <span className="absolute left-2.5 text-base select-none pointer-events-none">
+                                                                    {getAvatarByName(participantName)}
+                                                                </span>
+                                                                <input 
+                                                                    type="text"
+                                                                    value={participantName}
+                                                                    onChange={(e) => handleParticipantNameChange(e.target.value)}
+                                                                    placeholder="名前・ニックネーム (任意)"
+                                                                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none font-bold placeholder:font-normal"
+                                                                />
+                                                            </div>
+                                                            <div className="text-[11px] font-bold text-slate-500 shrink-0 flex items-center gap-1">
+                                                                <span>選択班:</span>
+                                                                <span className={`px-2 py-0.5 rounded-md font-mono font-bold ${COLOR_PALETTE.find(c => c.id === selectedColor)?.bg || 'bg-yellow-300'} ${COLOR_PALETTE.find(c => c.id === selectedColor)?.text || 'text-slate-900'} ring-1 ring-black/20 shadow-2xs`}>
+                                                                    {COLOR_PALETTE.find(c => c.id === selectedColor)?.numLabel || '①'}
+                                                                </span>
+                                                            </div>
                                                         </div>
-                                                        <div className="text-[11px] font-bold text-slate-500 shrink-0 flex items-center gap-1">
-                                                            <span>選択班:</span>
-                                                            <span className={`px-2 py-0.5 rounded-md font-mono font-bold ${COLOR_PALETTE.find(c => c.id === selectedColor)?.bg || 'bg-yellow-300'} ${COLOR_PALETTE.find(c => c.id === selectedColor)?.text || 'text-slate-900'} ring-1 ring-black/20 shadow-2xs`}>
-                                                                {COLOR_PALETTE.find(c => c.id === selectedColor)?.numLabel || '①'}
-                                                            </span>
+
+                                                        {/* ①〜⑧ 番号付きカラーパレット（タップで班・色を選択） */}
+                                                        <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                                                            {COLOR_PALETTE.map(color => {
+                                                                const isSelected = selectedColor === color.id;
+                                                                return (
+                                                                    <button
+                                                                        key={color.id}
+                                                                        type="button"
+                                                                        onClick={() => setSelectedColor(color.id)}
+                                                                        title={`付箋カラー: ${color.numLabel} ${color.name}`}
+                                                                        className={`flex-1 h-7 rounded-lg ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-xs transition active:scale-95 ${isSelected ? 'ring-2 ring-slate-900 scale-105 shadow-md z-10' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}>
+                                                                        {color.numLabel}
+                                                                    </button>
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
 
-                                                    {/* ①〜⑧ 番号付きカラーパレット（タップで班・色を選択） */}
-                                                    <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                                                        {COLOR_PALETTE.map(color => {
-                                                            const isSelected = selectedColor === color.id;
-                                                            return (
-                                                                <button
-                                                                    key={color.id}
-                                                                    type="button"
-                                                                    onClick={() => setSelectedColor(color.id)}
-                                                                    title={`付箋カラー: ${color.numLabel} ${color.name}`}
-                                                                    className={`flex-1 h-7 rounded-lg ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-xs transition active:scale-95 ${isSelected ? 'ring-2 ring-slate-900 scale-105 shadow-md z-10' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}>
-                                                                    {color.numLabel}
-                                                                </button>
-                                                            );
-                                                        })}
+                                                    {/* 意見入力テキストエリア */}
+                                                    <div>
+                                                        <textarea
+                                                            value={inputText}
+                                                            onChange={(e) => setInputText(e.target.value)}
+                                                            rows="2"
+                                                            placeholder="意見・アイデアを入力..."
+                                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-normal resize-none"
+                                                            required
+                                                        ></textarea>
                                                     </div>
-                                                </div>
 
-                                                {/* 意見入力テキストエリア */}
-                                                <div>
-                                                    <textarea
-                                                        value={inputText}
-                                                        onChange={(e) => setInputText(e.target.value)}
-                                                        rows="2"
-                                                        placeholder="意見・アイデアを入力..."
-                                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-normal resize-none"
-                                                        required
-                                                    ></textarea>
-                                                </div>
-
-                                                {/* 送信ボタン */}
-                                                <button
-                                                    type="submit"
-                                                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold py-2.5 rounded-xl shadow-md transition flex items-center justify-center gap-1.5 text-xs cursor-pointer">
-                                                    <i className="fa-solid fa-paper-plane"></i> 意見を送信する
-                                                </button>
-                                            </form>
+                                                    {/* 送信ボタン */}
+                                                    <button
+                                                        type="submit"
+                                                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold py-2.5 rounded-xl shadow-md transition flex items-center justify-center gap-1.5 text-xs cursor-pointer">
+                                                        <i className="fa-solid fa-paper-plane"></i> 意見を送信する
+                                                    </button>
+                                                </form>
+                                            )}
 
                                             {/* 講師画面から切り替えたときのみ戻るリンクを表示 */}
                                             {!isParticipantOnly && (
