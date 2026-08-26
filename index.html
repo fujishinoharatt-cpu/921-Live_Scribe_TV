@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.21.1)</title>
+    <title>研修ワークナビ AI (v1.21.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.21.1";
+        const APP_VERSION = "v1.21.2";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -119,10 +119,10 @@
             if (!rawUrl || !rawUrl.trim()) return '';
             const url = rawUrl.trim();
             const p = Math.max(1, parseInt(pageNum, 10) || 1);
-            // Google Slides: https://docs.google.com/presentation/d/{ID}/edit... -> /embed?slide=id.p{p}
+            // Google Slides: https://docs.google.com/presentation/d/{ID}/edit... -> /embed?rm=minimal&slide=id.p{p}
             const gslideMatch = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
             if (gslideMatch && gslideMatch[1]) {
-                return `https://docs.google.com/presentation/d/${gslideMatch[1]}/embed?start=false&loop=false&delayms=3000&slide=id.p${p}`;
+                return `https://docs.google.com/presentation/d/${gslideMatch[1]}/embed?start=false&loop=false&delayms=60000&rm=minimal&slide=id.p${p}`;
             }
             // Google Drive PDF: https://drive.google.com/file/d/{ID}/view -> /preview#page={p}
             const gdriveMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -2005,7 +2005,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
 
                                             {slideUrl ? (
                                                 <div className="flex-1 flex flex-col min-h-0 gap-2">
-                                                    {/* スライド本体 */}
+                                                    {/* スライド本体（透明カバーでGoogle内部クリックを完全遮断） */}
                                                     <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
                                                         <iframe
                                                             key={`slide-${participantSlidePage}`}
@@ -2014,6 +2014,11 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             allowFullScreen={true}
                                                             frameBorder="0"
                                                         ></iframe>
+                                                        {/* 🛡️ クリック先読み防止透明レイヤー（Google純正操作を100%無効化） */}
+                                                        <div 
+                                                            className="absolute inset-0 bg-transparent z-10 select-none cursor-default"
+                                                            title="スライドの切り替えは下のボタンをご利用ください"
+                                                        />
                                                     </div>
 
                                                     {/* 📱 受講者用ページ送りコントローラー（指定範囲外への先読みを物理ブロック） */}
@@ -2122,6 +2127,11 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             allowFullScreen={true}
                                                             frameBorder="0"
                                                         ></iframe>
+                                                        {/* 🛡️ クリック先読み防止透明レイヤー */}
+                                                        <div 
+                                                            className="absolute inset-0 bg-transparent z-10 select-none cursor-default"
+                                                            title="スライドの切り替えは下のボタンをご利用ください"
+                                                        />
                                                     </div>
 
                                                     {/* 💻 PC受講者用ページ送りコントローラー */}
