@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.11.0)</title>
+    <title>板書・意見整理 AI (v1.11.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.11.0";
+        const APP_VERSION = "v1.11.1";
 
         // 付箋カラーパレット定義（番号①〜⑧付き・班別手動選択対応）
         const COLOR_PALETTE = [
@@ -2363,19 +2363,45 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     }}
                     className={`sticky-card ${card.color} p-3.5 rounded-2xl border cursor-grab active:cursor-grabbing relative group transition ${isDragOver ? 'ring-2 ring-indigo-500 scale-[1.02] shadow-lg border-indigo-400' : ''}`}>
                     
-                    {card.author && (
-                        <div className="mb-1.5 flex items-center justify-between">
-                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1.5 shadow-2xs">
+                    {/* 上段ヘッダー：名前・動物アバター・時間 ＋ 【👍 いいねボタン & 削除ボタン】を同列配置 */}
+                    <div className="mb-2 flex items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                            <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1.5 shadow-2xs shrink-0">
                                 <span className={`w-2 h-2 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/20 shrink-0`}></span>
                                 <span className="text-xs">{getAvatarByName(card.author)}</span>
-                                <span>{card.author}</span>
+                                <span className="truncate max-w-[90px]">{card.author || '受講者'}</span>
                             </span>
                             {card.createdAt && (
-                                <span className="text-[9px] text-black/50 font-mono">🕒 {card.createdAt}</span>
+                                <span className="text-[9px] text-black/50 font-mono shrink-0">🕒 {card.createdAt}</span>
                             )}
                         </div>
-                    )}
 
+                        {/* いいねボタン ＆ 削除ボタン（名前行の右端にすっきり配置） */}
+                        <div className="flex items-center gap-1 shrink-0">
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onVote(card.id);
+                                }}
+                                title="いいね！"
+                                className="flex items-center gap-1 hover:scale-110 transition active:scale-95 bg-white/70 hover:bg-white px-2 py-0.5 rounded-full text-slate-800 font-bold text-[11px] shadow-2xs cursor-pointer border border-black/5">
+                                <span>👍</span>
+                                <span className="font-mono text-xs">{card.votes || 0}</span>
+                            </button>
+
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(card.id);
+                                }}
+                                title="付箋を削除"
+                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 p-0.5 rounded transition text-xs cursor-pointer">
+                                <i className="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 付箋本文 */}
                     {isEditing ? (
                         <textarea
                             value={text}
@@ -2388,10 +2414,10 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 }
                             }}
                             autoFocus
-                            className="w-full text-xs font-medium leading-relaxed bg-white/90 border border-indigo-400 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none h-20 mb-2"
+                            className="w-full text-xs font-medium leading-relaxed bg-white/90 border border-indigo-400 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none h-20"
                         />
                     ) : (
-                        <div className="flex justify-between items-start mb-3 gap-1">
+                        <div className="flex justify-between items-start gap-1">
                             <p 
                                 onClick={() => setIsEditing(true)}
                                 title="クリックして文字を編集"
@@ -2406,21 +2432,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             </button>
                         </div>
                     )}
-
-                    <div className="flex items-center justify-between pt-2 border-t border-black/10 text-[11px]">
-                        <button 
-                            onClick={() => onVote(card.id)}
-                            className="flex items-center gap-1 hover:scale-110 transition active:scale-95 bg-white/60 px-2 py-0.5 rounded-full text-slate-700 font-bold hover:bg-white">
-                            <span>👍</span>
-                            <span>{card.votes}</span>
-                        </button>
-
-                        <button 
-                            onClick={() => onDelete(card.id)}
-                            className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 p-1 transition">
-                            <i className="fa-solid fa-xmark"></i>
-                        </button>
-                    </div>
                 </div>
             );
         }
