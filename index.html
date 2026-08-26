@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.13.0)</title>
+    <title>板書・意見整理 AI (v1.13.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.13.0";
+        const APP_VERSION = "v1.13.1";
 
         // 付箋カラーパレット定義（番号①〜⑧付き・班別手動選択対応）
         const COLOR_PALETTE = [
@@ -593,13 +593,26 @@
                 if (cards.length > 0 && !confirm(`現在の作業中の板書は上書きされます。\n「${archive.title}」を復元しますか？`)) {
                     return;
                 }
-                setCards(archive.cards || []);
-                setCategories(archive.categories || INITIAL_CATEGORIES);
-                setSummaries(archive.summaries || {});
-                if (archive.title) setSessionThemeTitle(archive.title);
+                const restoredTitle = archive.title || 'ワークショップ・意見整理';
+                const restoredCards = archive.cards || [];
+                const restoredCategories = archive.categories || INITIAL_CATEGORIES;
+                const restoredSummaries = archive.summaries || {};
+
+                setCards(restoredCards);
+                setCategories(restoredCategories);
+                setSummaries(restoredSummaries);
+                setSessionThemeTitle(restoredTitle);
+                setTempThemeTitle(restoredTitle);
+
+                localStorage.setItem('bansho_session_title', restoredTitle);
+                localStorage.setItem('bansho_cards', JSON.stringify(restoredCards));
+                localStorage.setItem('bansho_categories', JSON.stringify(restoredCategories));
+
                 setShowArchiveModal(false);
-                broadcastToClients({ type: 'SESSION_RESTORED', title: archive.title });
-                showToast(`🔄「${archive.title}」の板書を復元しました！`);
+                broadcastToClients({ type: 'SYNC_THEME', themeTitle: restoredTitle });
+                broadcastToClients({ type: 'SYNC_CARDS', cards: restoredCards, themeTitle: restoredTitle });
+                broadcastToClients({ type: 'SESSION_RESTORED', title: restoredTitle });
+                showToast(`🔄「${restoredTitle}」の板書を復元しました！`);
             };
 
             // アーカイブを削除
