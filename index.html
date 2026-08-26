@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.18.1)</title>
+    <title>研修ワークナビ AI (v1.19.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.18.1";
+        const APP_VERSION = "v1.19.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -163,6 +163,16 @@
 
             const [activeRoomId, setActiveRoomId] = useState(isParticipantOnly ? targetRoomParam : getInitialHostRoomId());
             const [connectedCount, setConnectedCount] = useState(0);
+
+            // 画面サイズ判定（スマホ < 768px <= 一般PC）
+            const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+            const [participantPcTab, setParticipantPcTab] = useState('slide'); // 'slide' | 'board'
+
+            useEffect(() => {
+                const handleResize = () => setIsMobile(window.innerWidth < 768);
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
 
             const [appRole, setAppRole] = useState(initialRole);
 
@@ -1444,19 +1454,21 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* Header (整理された1段統合・中央特大テーマ & 役割別ボタングループ) */}
                     <header className={`bg-slate-950 text-white shadow-xl z-20 shrink-0 ${isParticipantOnly ? 'px-3.5 py-2' : 'px-5 py-2.5'} flex items-center justify-between border-b border-slate-800 gap-3`}>
                         
-                        {/* ⬅ 左側：ロゴ & アプリ名（上品にコンパクト化） */}
+                        {/* ⬅ 左側：ロゴ & アプリ名（3段構え: 講師PC / 一般PC / スマホ） */}
                         <div className="flex items-center space-x-2.5 shrink-0">
-                            <div className={`bg-indigo-600 text-white rounded-xl flex items-center justify-center font-bold shadow-inner ${isParticipantOnly ? 'w-7 h-7 text-sm' : 'w-9 h-9 text-lg'}`}>
-                                <i className={isParticipantOnly ? "fa-solid fa-mobile-screen" : "fa-solid fa-chalkboard-user"}></i>
+                            <div className={`bg-indigo-600 text-white rounded-xl flex items-center justify-center font-bold shadow-inner ${isParticipantOnly && isMobile ? 'w-7 h-7 text-sm' : 'w-9 h-9 text-base sm:text-lg'}`}>
+                                <i className={isParticipantOnly ? (isMobile ? "fa-solid fa-mobile-screen" : "fa-solid fa-laptop") : "fa-solid fa-chalkboard-user"}></i>
                             </div>
                             <div>
-                                <h1 className={`${isParticipantOnly ? 'text-xs' : 'text-sm'} font-bold tracking-wide flex items-center gap-1.5 leading-tight`}>
-                                    {isParticipantOnly ? "意見投稿フォーム" : "板書ボード"}
+                                <h1 className={`${isParticipantOnly && isMobile ? 'text-xs' : 'text-sm'} font-bold tracking-wide flex items-center gap-1.5 leading-tight`}>
+                                    {isParticipantOnly ? (isMobile ? "受講者ポータル" : "受講者ボード") : "講師進行ボード"}
                                     <span className="text-[9px] bg-indigo-600/90 text-white px-1.5 py-0.2 rounded font-mono font-bold">{APP_VERSION}</span>
                                 </h1>
-                                {!isParticipantOnly && (
-                                    <p className="text-[10px] text-slate-400 hidden xl:block">リアルタイム意見収集 ➔ AI一元整理</p>
-                                )}
+                                <p className="text-[10px] text-slate-400 hidden sm:block">
+                                    {isParticipantOnly 
+                                        ? (isMobile ? "手元のスマホで意見投稿・スライド確認" : "大画面でスライド閲覧＆リアルタイム意見投稿")
+                                        : "リアルタイム意見収集 ➔ スライド投影 ➔ AI一元整理"}
+                                </p>
                             </div>
                         </div>
 
@@ -1572,7 +1584,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             <span className="hidden sm:inline">{isSubmissionsLocked ? '受付停止中' : '受付中'}</span>
                                         </button>
                                     </div>
-
                                     {/* 1. 受講者・AIメイン操作グループ（鮮やかカラーで目立たせる） */}
                                     <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
                                         <button 
@@ -1666,317 +1677,550 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     </header>
 
                     {appRole === 'participant' ? (
-                        /* Participant View (スマホ最適化・確実表示レイアウト・横スクロール完全防止) */
-                        <div className="flex-1 bg-slate-900 p-2 sm:p-4 overflow-x-hidden overflow-y-hidden flex flex-col items-center justify-start h-full min-h-0 w-full max-w-full">
-                            <div className="max-w-md w-full max-w-full flex flex-col h-full min-h-0 gap-2 overflow-x-hidden">
-                                
-                                {/* ⏱️ リアルタイム同期タイマーバー */}
-                                {(timerSeconds > 0 || isTimeUp) && (
-                                    <div className={`px-3 py-1.5 rounded-xl border flex items-center justify-between shadow-md shrink-0 transition-all ${isTimeUp ? 'bg-rose-900/90 border-rose-500 text-white animate-bounce' : (timerSeconds <= 30 ? 'bg-amber-900/90 border-amber-500 text-amber-200 animate-pulse' : 'bg-indigo-950/90 border-indigo-500/50 text-indigo-100')}`}>
-                                        <div className="flex items-center gap-1.5 font-bold text-xs">
-                                            <span className="text-sm">{isTimeUp ? '🔔' : '⏱️'}</span>
-                                            <span>{isTimeUp ? '時間終了！' : (isTimerRunning ? '残りワーク時間' : 'タイマー一時停止中')}</span>
-                                        </div>
-                                        <span className="font-mono font-black text-sm tracking-wider bg-black/30 px-2 py-0.5 rounded-md">
-                                            {formatTime(timerSeconds)}
-                                        </span>
-                                    </div>
-                                )}
-
-                                {/* 📌 現在のテーマタイトル表示バナー */}
-                                <div className="bg-gradient-to-r from-indigo-900/90 to-slate-800/90 px-3 py-1.5 rounded-xl border border-indigo-500/30 flex items-center justify-between gap-2 shadow-xs shrink-0">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                        <span className="text-[10px] bg-amber-400 text-slate-900 font-bold px-1.5 py-0.2 rounded shrink-0">テーマ</span>
-                                        <h2 className="text-xs font-bold text-white truncate">
-                                            {sessionThemeTitle}
-                                        </h2>
-                                    </div>
-                                    {isSubmissionsLocked && (
-                                        <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold shrink-0 flex items-center gap-1">
-                                            <i className="fa-solid fa-lock text-[9px]"></i> 受付停止中
-                                        </span>
-                                    )}
-                                </div>
-
-                                {/* タブ切り替えバー（3タブ構成: スライド ➔ 投稿 ➔ 意見） */}
-                                <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1 shrink-0 shadow-md">
-                                    <button 
-                                        onClick={() => setParticipantTab('slide')}
-                                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'slide' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                        <i className="fa-solid fa-file-powerpoint text-indigo-300"></i> スライド
-                                        {slideUrl && (
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                        )}
-                                    </button>
-                                    <button 
-                                        onClick={() => setParticipantTab('post')}
-                                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'post' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                        <i className="fa-solid fa-pen-to-square"></i> 投稿
-                                    </button>
-                                    <button 
-                                        onClick={() => setParticipantTab('timeline')}
-                                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'timeline' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
-                                        <i className="fa-solid fa-comments"></i> 意見
-                                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${participantTab === 'timeline' ? 'bg-white text-indigo-700' : 'bg-slate-700 text-slate-300'}`}>
-                                            {cards.length}
-                                        </span>
-                                    </button>
-                                </div>
-
-                                {participantTab === 'post' ? (
-                                    /* 📝 投稿・履歴タブ（上: 投稿履歴 / 下: 投稿フォーム） */
-                                    <div className="flex flex-col flex-1 min-h-0 gap-2">
-                                        {/* 📜 上部：あなたの投稿履歴セクション（伸縮・スクロール可能） */}
-                                        <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 min-h-0 flex flex-col overflow-hidden">
-                                            <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700/80 shrink-0">
-                                                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                                                    <i className="fa-solid fa-clock-rotate-left text-amber-400 text-[11px]"></i>
-                                                    あなたの投稿履歴
-                                                    <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                                                        {myHistory.length} 件
-                                                    </span>
-                                                </h3>
-                                                {myHistory.length > 0 && (
-                                                    <button 
-                                                        onClick={handleClearHistory}
-                                                        className="text-[10px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
-                                                        <i className="fa-solid fa-trash-can text-[9px]"></i> 履歴消去
-                                                    </button>
-                                                )}
+                        isMobile ? (
+                            /* 📱 受講者スマホビュー（3タブ構成: スライド ➔ 投稿 ➔ 意見） */
+                            <div className="flex-1 bg-slate-900 p-2 sm:p-4 overflow-x-hidden overflow-y-hidden flex flex-col items-center justify-start h-full min-h-0 w-full max-w-full">
+                                <div className="max-w-md w-full max-w-full flex flex-col h-full min-h-0 gap-2 overflow-x-hidden">
+                                    
+                                    {/* ⏱️ リアルタイム同期タイマーバー */}
+                                    {(timerSeconds > 0 || isTimeUp) && (
+                                        <div className={`px-3 py-1.5 rounded-xl border flex items-center justify-between shadow-md shrink-0 transition-all ${isTimeUp ? 'bg-rose-900/90 border-rose-500 text-white animate-bounce' : (timerSeconds <= 30 ? 'bg-amber-900/90 border-amber-500 text-amber-200 animate-pulse' : 'bg-indigo-950/90 border-indigo-500/50 text-indigo-100')}`}>
+                                            <div className="flex items-center gap-1.5 font-bold text-xs">
+                                                <span className="text-sm">{isTimeUp ? '🔔' : '⏱️'}</span>
+                                                <span>{isTimeUp ? '時間終了！' : (isTimerRunning ? '残りワーク時間' : 'タイマー一時停止中')}</span>
                                             </div>
-
-                                            {myHistory.length === 0 ? (
-                                                <div className="text-center py-4 border border-dashed border-slate-700 rounded-xl my-auto">
-                                                    <p className="text-[11px] text-slate-400 font-medium">まだ投稿した意見はありません</p>
-                                                    <p className="text-[10px] text-slate-500 mt-0.5">下のフォームから意見を送信してみましょう！</p>
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-1.5 flex-1 overflow-y-auto pr-1">
-                                                    {myHistory.map((item) => (
-                                                        <div 
-                                                            key={item.id} 
-                                                            className={`${item.color} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
-                                                            <div className="flex items-center justify-between gap-1.5 mb-1">
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <span className="text-[9px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1">
-                                                                        <span>{getAvatarByName(item.author)}</span>
-                                                                        <span>{item.author || '受講者'}</span>
-                                                                    </span>
-                                                                    {item.createdAt && (
-                                                                        <span className="text-[9px] text-black/60 font-mono">
-                                                                            🕒 {item.createdAt}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                                <div className="flex items-center gap-1">
-                                                                    <button 
-                                                                        onClick={() => handleReuseHistory(item)}
-                                                                        title="この内容をもう一度入力欄にセット"
-                                                                        className="text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 shadow-2xs">
-                                                                        <i className="fa-solid fa-arrow-rotate-left text-[8px]"></i> 再利用
-                                                                    </button>
-                                                                    <button 
-                                                                        onClick={() => handleCancelSend(item)}
-                                                                        title="この意見の送信を取り消す（講師ボードからも削除）"
-                                                                        className="text-rose-700 hover:text-white bg-rose-500/15 hover:bg-rose-600 px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 border border-rose-400/30">
-                                                                        <i className="fa-solid fa-trash-can text-[8px]"></i> 取消
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            <p className="text-xs font-medium leading-snug break-words text-slate-800">
-                                                                {item.text}
-                                                            </p>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* 📝 下部：投稿フォームカード（常時画面内に固定）または ロック中案内 */}
-                                        <div className="bg-white rounded-2xl p-3 shadow-2xl border border-slate-100 shrink-0">
-                                            {isSubmissionsLocked ? (
-                                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-center">
-                                                    <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto mb-1.5 text-sm">
-                                                        <i className="fa-solid fa-lock"></i>
-                                                    </div>
-                                                    <h4 className="text-xs font-bold text-amber-900 mb-1">現在は投稿受付を一時停止しています</h4>
-                                                    <p className="text-[11px] text-amber-700 leading-relaxed">
-                                                        講師の解説・まとめをお聞きください 🎤<br />
-                                                        （「みんなの意見」タブで閲覧・いいねは可能です）
-                                                    </p>
-                                                </div>
-                                            ) : (
-                                                <form onSubmit={handleAddCard} className="space-y-2">
-                                                    {/* 名前 & 班・カラー選択（番号①〜⑧の手動選択） */}
-                                                    <div className="space-y-1.5">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="relative flex-1 flex items-center">
-                                                                <span className="absolute left-2.5 text-base select-none pointer-events-none">
-                                                                    {getAvatarByName(participantName)}
-                                                                </span>
-                                                                <input 
-                                                                    type="text"
-                                                                    value={participantName}
-                                                                    onChange={(e) => handleParticipantNameChange(e.target.value)}
-                                                                    placeholder="名前・ニックネーム (任意)"
-                                                                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none font-bold placeholder:font-normal"
-                                                                />
-                                                            </div>
-                                                            <div className="text-[11px] font-bold text-slate-500 shrink-0 flex items-center gap-1">
-                                                                <span>選択班:</span>
-                                                                <span className={`px-2 py-0.5 rounded-md font-mono font-bold ${COLOR_PALETTE.find(c => c.id === selectedColor)?.bg || 'bg-yellow-300'} ${COLOR_PALETTE.find(c => c.id === selectedColor)?.text || 'text-slate-900'} ring-1 ring-black/20 shadow-2xs`}>
-                                                                    {COLOR_PALETTE.find(c => c.id === selectedColor)?.numLabel || '①'}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-
-                                                        {/* ①〜⑩ 番号・記号付きカラーパレット（タップで班・色を選択・スマホ横幅に完全フィット） */}
-                                                        <div className="grid grid-cols-10 gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full max-w-full">
-                                                            {COLOR_PALETTE.map(color => {
-                                                                const isSelected = selectedColor === color.id;
-                                                                return (
-                                                                    <button
-                                                                        key={color.id}
-                                                                        type="button"
-                                                                        onClick={() => setSelectedColor(color.id)}
-                                                                        title={`付箋カラー: ${color.numLabel} ${color.name}`}
-                                                                        className={`w-full h-6 sm:h-7 rounded-md ${color.bg} ${color.text} flex items-center justify-center font-bold font-mono text-[10px] sm:text-xs transition active:scale-95 ${isSelected ? 'ring-2 ring-slate-900 scale-105 shadow-md z-10' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}>
-                                                                        {color.numLabel}
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* 意見入力テキストエリア */}
-                                                    <div>
-                                                        <textarea
-                                                            value={inputText}
-                                                            onChange={(e) => setInputText(e.target.value)}
-                                                            rows="2"
-                                                            placeholder="意見・アイデアを入力..."
-                                                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-normal resize-none"
-                                                            required
-                                                        ></textarea>
-                                                    </div>
-
-                                                    {/* 送信ボタン */}
-                                                    <button
-                                                        type="submit"
-                                                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold py-2.5 rounded-xl shadow-md transition flex items-center justify-center gap-1.5 text-xs cursor-pointer">
-                                                        <i className="fa-solid fa-paper-plane"></i> 意見を送信する
-                                                    </button>
-                                                </form>
-                                            )}
-
-                                            {/* 講師画面から切り替えたときのみ戻るリンクを表示 */}
-                                            {!isParticipantOnly && (
-                                                <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-center">
-                                                    <button 
-                                                        onClick={() => setAppRole('board')}
-                                                        className="text-[11px] text-indigo-600 hover:underline font-bold">
-                                                        ← 講師用メインボード表示に戻る
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ) : participantTab === 'timeline' ? (
-                                    /* 💬 みんなの意見タイムラインタブ */
-                                    <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0">
-                                        {/* 上部コントロールバー（ソート切り替え & 件数） */}
-                                        <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/80 shrink-0">
-                                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                                                <i className="fa-solid fa-comments text-indigo-400 text-[11px]"></i>
-                                                全 {cards.length} 件の意見
+                                            <span className="font-mono font-black text-sm tracking-wider bg-black/30 px-2 py-0.5 rounded-md">
+                                                {formatTime(timerSeconds)}
                                             </span>
-                                            <div className="flex items-center space-x-1 bg-slate-900/80 p-0.5 rounded-lg border border-slate-700">
-                                                <button
-                                                    onClick={() => setTimelineSort('latest')}
-                                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1 ${timelineSort === 'latest' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
-                                                    <i className="fa-solid fa-clock text-[9px]"></i> 新着順
-                                                </button>
-                                                <button
-                                                    onClick={() => setTimelineSort('votes')}
-                                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1 ${timelineSort === 'votes' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
-                                                    <i className="fa-solid fa-fire text-[9px]"></i> 人気順
-                                                </button>
-                                            </div>
                                         </div>
+                                    )}
 
-                                        {/* カード一覧リスト */}
-                                        {cards.length === 0 ? (
-                                            <div className="text-center py-8 border border-dashed border-slate-700 rounded-xl my-auto">
-                                                <i className="fa-solid fa-inbox text-2xl text-slate-600 mb-2"></i>
-                                                <p className="text-[11px] text-slate-400 font-medium">まだ意見が投稿されていません</p>
-                                                <p className="text-[10px] text-slate-500 mt-0.5">「投稿・履歴」タブから最初の意見を投稿してみましょう！</p>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-1.5 flex-1 overflow-y-auto pr-1">
-                                                {[...cards]
-                                                    .sort((a, b) => {
-                                                        if (timelineSort === 'votes') {
-                                                            return (b.votes || 0) - (a.votes || 0);
-                                                        }
-                                                        return 0; // 新着順（配列順）
-                                                    })
-                                                    .map(card => {
-                                                        const isMyCard = myHistory.some(h => h.id === card.id);
-                                                        const isVoted = !!myVotes[card.id];
-                                                        const cat = categories.find(c => c.id === card.categoryId);
-                                                        const level = card.level || 0;
-                                                        const mobileIndent = level === 2 ? 'ml-4 border-l-4 border-l-indigo-400 pl-1.5' : (level === 1 ? 'ml-2 border-l-4 border-l-amber-400 pl-1.5' : '');
+                                    {/* 📌 現在のテーマタイトル表示バナー */}
+                                    <div className="bg-gradient-to-r from-indigo-900/90 to-slate-800/90 px-3 py-1.5 rounded-xl border border-indigo-500/30 flex items-center justify-between gap-2 shadow-xs shrink-0">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <span className="text-[10px] bg-amber-400 text-slate-900 font-bold px-1.5 py-0.2 rounded shrink-0">テーマ</span>
+                                            <h2 className="text-xs font-bold text-white truncate">
+                                                {sessionThemeTitle}
+                                            </h2>
+                                        </div>
+                                        {isSubmissionsLocked && (
+                                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold shrink-0 flex items-center gap-1">
+                                                <i className="fa-solid fa-lock text-[9px]"></i> 受付停止中
+                                            </span>
+                                        )}
+                                    </div>
 
-                                                        return (
+                                    {/* タブ切り替えバー（3タブ構成: スライド ➔ 投稿 ➔ 意見） */}
+                                    <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1 shrink-0 shadow-md">
+                                        <button 
+                                            onClick={() => setParticipantTab('slide')}
+                                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'slide' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                            <i className="fa-solid fa-file-powerpoint text-indigo-300"></i> スライド
+                                            {slideUrl && (
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                            )}
+                                        </button>
+                                        <button 
+                                            onClick={() => setParticipantTab('post')}
+                                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'post' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                            <i className="fa-solid fa-pen-to-square"></i> 投稿
+                                        </button>
+                                        <button 
+                                            onClick={() => setParticipantTab('timeline')}
+                                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'timeline' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                            <i className="fa-solid fa-comments"></i> 意見
+                                            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${participantTab === 'timeline' ? 'bg-white text-indigo-700' : 'bg-slate-700 text-slate-300'}`}>
+                                                {cards.length}
+                                            </span>
+                                        </button>
+                                    </div>
+
+                                    {participantTab === 'post' ? (
+                                        /* 📝 投稿・履歴タブ */
+                                        <div className="flex flex-col flex-1 min-h-0 gap-2">
+                                            {/* 📜 あなたの投稿履歴 */}
+                                            <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 min-h-0 flex flex-col overflow-hidden">
+                                                <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700/80 shrink-0">
+                                                    <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                        <i className="fa-solid fa-clock-rotate-left text-amber-400 text-[11px]"></i>
+                                                        あなたの投稿履歴
+                                                        <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                                                            {myHistory.length} 件
+                                                        </span>
+                                                    </h3>
+                                                    {myHistory.length > 0 && (
+                                                        <button 
+                                                            onClick={handleClearHistory}
+                                                            className="text-[10px] text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
+                                                            <i className="fa-solid fa-trash-can text-[9px]"></i> 履歴消去
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                {myHistory.length === 0 ? (
+                                                    <div className="text-center py-4 border border-dashed border-slate-700 rounded-xl my-auto">
+                                                        <p className="text-[11px] text-slate-400 font-medium">まだ投稿した意見はありません</p>
+                                                        <p className="text-[10px] text-slate-500 mt-0.5">下のフォームから意見を送信してみましょう！</p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-1.5 flex-1 overflow-y-auto pr-1">
+                                                        {myHistory.map((item) => (
                                                             <div 
-                                                                key={card.id} 
-                                                                className={`${card.color} ${mobileIndent} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
-                                                                
-                                                                {/* 上段ヘッダー：名前・時間・カテゴリ ＋ 【いいねボタンを同列配置】 */}
+                                                                key={item.id} 
+                                                                className={`${item.color} p-2 rounded-xl border shadow-xs flex flex-col justify-between transition hover:shadow-sm`}>
                                                                 <div className="flex items-center justify-between gap-1.5 mb-1">
-                                                                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                                                        {level === 1 && (
-                                                                            <span className="text-[8px] font-black bg-amber-500/20 text-amber-900 px-1 py-0.2 rounded font-mono">
-                                                                                ↳
-                                                                            </span>
-                                                                        )}
-                                                                        {level === 2 && (
-                                                                            <span className="text-[8px] font-black bg-indigo-500/20 text-indigo-900 px-1 py-0.2 rounded font-mono">
-                                                                                ↳↳
-                                                                            </span>
-                                                                        )}
-                                                                        <span className="text-[10px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1 shrink-0">
-                                                                            <span className={`w-2 h-2 rounded-full ${COLOR_PALETTE.find(c => c.id === (card.color || getColorByName(card.author)))?.dot || 'bg-amber-400'} ring-1 ring-black/20 shrink-0`}></span>
-                                                                            <span className="text-[11px]">{getAvatarByName(card.author)}</span>
-                                                                            <span>{card.author || '受講者'}</span>
-                                                                            {isMyCard && (
-                                                                                <span className="bg-indigo-600 text-white text-[8px] px-1 rounded font-bold">あなた</span>
-                                                                            )}
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <span className="text-[9px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                                                            <span>{getAvatarByName(item.author)}</span>
+                                                                            <span>{item.author || '受講者'}</span>
                                                                         </span>
-                                                                        {card.createdAt && (
-                                                                            <span className="text-[9px] text-black/60 font-mono shrink-0">
-                                                                                🕒 {card.createdAt}
-                                                                            </span>
-                                                                        )}
-                                                                        {cat && (
-                                                                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-white shrink-0 truncate max-w-[90px]">
-                                                                                {cat.title}
+                                                                        {item.createdAt && (
+                                                                            <span className="text-[9px] text-black/60 font-mono">
+                                                                                🕒 {item.createdAt}
                                                                             </span>
                                                                         )}
                                                                     </div>
+                                                                    <div className="flex items-center gap-1">
+                                                                        <button 
+                                                                            onClick={() => handleReuseHistory(item)}
+                                                                            title="この内容をもう一度入力欄にセット"
+                                                                            className="text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 shadow-2xs">
+                                                                            <i className="fa-solid fa-arrow-rotate-left text-[8px]"></i> 再利用
+                                                                        </button>
+                                                                        <button 
+                                                                            onClick={() => handleCancelSend(item)}
+                                                                            title="この意見の送信を取り消す"
+                                                                            className="text-rose-700 hover:text-white bg-rose-500/15 hover:bg-rose-600 px-1.5 py-0.5 rounded text-[9px] font-bold transition flex items-center gap-1 border border-rose-400/30">
+                                                                            <i className="fa-solid fa-trash-can text-[8px]"></i> 取消
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                <p className="text-xs font-medium leading-snug break-words text-slate-800">
+                                                                    {item.text}
+                                                                </p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
 
-                                                                    {/* 名前の行にいいねボタンを配置して高さを削減 */}
+                                            {/* 📝 意見投稿フォーム */}
+                                            <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm shrink-0 flex flex-col gap-2">
+                                                {/* 名前入力 & 班カラーパレット */}
+                                                <div className="flex flex-col gap-1.5">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-[11px] font-bold text-slate-300 shrink-0">お名前/班:</span>
+                                                        <div className="relative flex-1">
+                                                            <input 
+                                                                type="text"
+                                                                value={participantName}
+                                                                onChange={(e) => handleParticipantNameChange(e.target.value)}
+                                                                placeholder="例: 山田 / A班"
+                                                                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 pl-6"
+                                                            />
+                                                            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs">
+                                                                {getAvatarByName(participantName)}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-1 overflow-x-auto pb-0.5 pt-0.5">
+                                                        <span className="text-[10px] font-bold text-slate-400 shrink-0 mr-0.5">色:</span>
+                                                        {COLOR_PALETTE.map((c) => (
+                                                            <button
+                                                                key={c.id}
+                                                                type="button"
+                                                                onClick={() => setSelectedColor(c.id)}
+                                                                title={c.name}
+                                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition shrink-0 cursor-pointer ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow-sm ' + c.id : 'opacity-70 hover:opacity-100 ' + c.id}`}>
+                                                                {c.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <form onSubmit={handleSendParticipantCard} className="flex flex-col gap-1.5">
+                                                    <div className="relative">
+                                                        <textarea
+                                                            value={inputText}
+                                                            onChange={(e) => setInputText(e.target.value)}
+                                                            disabled={isSubmissionsLocked}
+                                                            placeholder={isSubmissionsLocked ? "現在、講師により投稿受付が一時停止されています" : "あなたの意見や気づきを入力してください..."}
+                                                            rows="2"
+                                                            className={`w-full ${selectedColor} border rounded-xl p-2 text-xs placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-medium leading-snug transition ${isSubmissionsLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                            onKeyDown={(e) => {
+                                                                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                                                    handleSendParticipantCard(e);
+                                                                }
+                                                            }}
+                                                        ></textarea>
+                                                    </div>
+                                                    <button
+                                                        type="submit"
+                                                        disabled={isSubmissionsLocked || !inputText.trim()}
+                                                        className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow active:scale-95 cursor-pointer ${isSubmissionsLocked || !inputText.trim() ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-60' : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white'}`}>
+                                                        <i className="fa-solid fa-paper-plane text-[10px]"></i>
+                                                        <span>{isSubmissionsLocked ? '受付停止中' : 'ボードに意見を送信'}</span>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    ) : participantTab === 'timeline' ? (
+                                        /* 💬 みんなの意見タイムライン */
+                                        <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 overflow-hidden">
+                                            <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700/80 shrink-0">
+                                                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-comments text-indigo-400"></i>
+                                                    みんなの意見一覧
+                                                    <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                                                        {cards.length} 件
+                                                    </span>
+                                                </h3>
+                                                <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-700 text-[10px]">
+                                                    <button 
+                                                        onClick={() => setTimelineSort('latest')}
+                                                        className={`px-1.5 py-0.5 rounded font-bold transition ${timelineSort === 'latest' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                                        新着順
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setTimelineSort('votes')}
+                                                        className={`px-1.5 py-0.5 rounded font-bold transition ${timelineSort === 'votes' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                                        いいね順
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {cards.length === 0 ? (
+                                                <div className="text-center py-12 border border-dashed border-slate-700 rounded-xl my-auto">
+                                                    <p className="text-xs text-slate-400">まだ意見が投稿されていません</p>
+                                                    <p className="text-[10px] text-slate-500 mt-1">「投稿」タブから最初の意見を送信してみましょう！</p>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-2 flex-1 overflow-y-auto pr-1">
+                                                    {cards
+                                                        .slice()
+                                                        .sort((a, b) => {
+                                                            if (timelineSort === 'votes') return (b.votes || 0) - (a.votes || 0);
+                                                            return 0;
+                                                        })
+                                                        .map((card) => {
+                                                            const hasVoted = !!myVotes[card.id];
+                                                            const category = categories.find(c => c.id === card.categoryId);
+                                                            return (
+                                                                <div 
+                                                                    key={card.id} 
+                                                                    className={`${card.color || 'sticky-yellow'} p-2.5 rounded-xl border shadow-xs flex flex-col justify-between gap-1 transition hover:shadow-sm`}>
+                                                                    <div className="flex items-center justify-between gap-1.5">
+                                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                                            <span className="text-[9px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                                                                <span>{getAvatarByName(card.author)}</span>
+                                                                                <span>{card.author || '受講者'}</span>
+                                                                            </span>
+                                                                            {category && (
+                                                                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-white">
+                                                                                    {category.title}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => handleToggleVote(card.id)}
+                                                                            title={hasVoted ? "いいねを取り消す" : "共感した！"}
+                                                                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow-2xs border ${hasVoted ? 'bg-rose-500 text-white border-rose-600 scale-105' : 'bg-white/80 hover:bg-white text-slate-700 border-slate-300'}`}>
+                                                                            <i className={`fa-solid fa-heart ${hasVoted ? 'text-white' : 'text-rose-500'}`}></i>
+                                                                            <span>{card.votes || 0}</span>
+                                                                        </button>
+                                                                    </div>
+                                                                    <p className="text-xs font-medium leading-relaxed break-words text-slate-800">
+                                                                        {card.text}
+                                                                    </p>
+                                                                </div>
+                                                            );
+                                                        })
+                                                    }
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        /* 📄 研修スライド（Googleスライド / PDF）スマホビュー */
+                                        <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 overflow-hidden">
+                                            <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700/80 shrink-0">
+                                                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-file-powerpoint text-indigo-400"></i>
+                                                    研修スライド資料
+                                                </h3>
+                                                {slideUrl && (
+                                                    <a 
+                                                        href={slideUrl} 
+                                                        target="_blank" 
+                                                        rel="noreferrer"
+                                                        className="text-[10px] text-indigo-300 hover:text-white flex items-center gap-1 bg-indigo-900/60 px-2 py-0.5 rounded border border-indigo-700/50">
+                                                        <i className="fa-solid fa-up-right-from-square text-[9px]"></i> 別窓で開く
+                                                    </a>
+                                                )}
+                                            </div>
+                                            {slideUrl ? (
+                                                <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700">
+                                                    <iframe
+                                                        src={slideUrl}
+                                                        className="w-full h-full border-0"
+                                                        allowFullScreen={true}
+                                                        frameBorder="0"
+                                                    ></iframe>
+                                                </div>
+                                            ) : (
+                                                <div className="text-center py-12 border border-dashed border-slate-700 rounded-xl my-auto p-4">
+                                                    <i className="fa-solid fa-file-powerpoint text-3xl text-slate-600 mb-2"></i>
+                                                    <p className="text-xs text-slate-300 font-bold">スライド資料は準備中です</p>
+                                                    <p className="text-[10px] text-slate-400 mt-1">講師がGoogleスライドURLを設定すると、ここに自動で表示されます。</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            /* 💻 受講者一般PCビュー（大画面デュアルパネル: 左 スライド/板書閲覧 + 右 投稿&タイムライン） */
+                            <div className="flex-1 bg-slate-900 p-3 lg:p-4 flex gap-4 h-full min-h-0 overflow-hidden">
+                                
+                                {/* ⬅ 左側パネル（60%幅）：スライド閲覧 または 板書ボード閲覧 */}
+                                <div className="flex-[3] flex flex-col h-full min-h-0 bg-slate-800/90 rounded-2xl border border-slate-700 shadow-xl overflow-hidden">
+                                    {/* パネルヘッダー：タブ切り替え & テーマ/タイマー */}
+                                    <div className="bg-slate-950 px-4 py-2 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+                                        <div className="flex items-center gap-1.5">
+                                            <button 
+                                                onClick={() => setParticipantPcTab('slide')}
+                                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${participantPcTab === 'slide' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                                                <i className="fa-solid fa-file-powerpoint text-indigo-300"></i>
+                                                <span>研修スライド</span>
+                                                {slideUrl && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>}
+                                            </button>
+                                            <button 
+                                                onClick={() => setParticipantPcTab('board')}
+                                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${participantPcTab === 'board' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                                                <i className="fa-solid fa-chalkboard text-indigo-300"></i>
+                                                <span>板書ボード (閲覧)</span>
+                                                <span className="bg-slate-800 text-slate-300 text-[10px] px-1.5 py-0.2 rounded-full font-mono">{cards.length}</span>
+                                            </button>
+                                        </div>
+
+                                        <div className="flex items-center gap-3">
+                                            {/* テーマタイトル */}
+                                            <div className="hidden xl:flex items-center gap-1.5 bg-slate-900 px-3 py-1 rounded-xl border border-slate-800 text-xs text-white">
+                                                <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-1.5 py-0.2 rounded">テーマ</span>
+                                                <span className="font-bold truncate max-w-xs">{sessionThemeTitle}</span>
+                                            </div>
+
+                                            {/* タイマー */}
+                                            {(timerSeconds > 0 || isTimeUp) && (
+                                                <div className={`px-2.5 py-1 rounded-xl border flex items-center gap-1.5 font-bold text-xs shadow-xs ${isTimeUp ? 'bg-rose-900 border-rose-500 text-white animate-bounce' : (timerSeconds <= 30 ? 'bg-amber-900 border-amber-500 text-amber-200 animate-pulse' : 'bg-indigo-950 border-indigo-500/50 text-indigo-200')}`}>
+                                                    <span>{isTimeUp ? '🔔 終了' : '⏱️'}</span>
+                                                    <span className="font-mono">{formatTime(timerSeconds)}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* パネルコンテンツ */}
+                                    <div className="flex-1 min-h-0 p-3 bg-slate-900/60 overflow-hidden flex flex-col">
+                                        {participantPcTab === 'slide' ? (
+                                            /* スライド埋め込み */
+                                            slideUrl ? (
+                                                <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
+                                                    <iframe
+                                                        src={slideUrl}
+                                                        className="w-full h-full border-0"
+                                                        allowFullScreen={true}
+                                                        frameBorder="0"
+                                                    ></iframe>
+                                                    <a 
+                                                        href={slideUrl} 
+                                                        target="_blank" 
+                                                        rel="noreferrer"
+                                                        className="absolute top-3 right-3 bg-slate-900/80 hover:bg-slate-900 text-indigo-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-700 shadow-md backdrop-blur-sm flex items-center gap-1.5 transition">
+                                                        <i className="fa-solid fa-up-right-from-square text-[10px]"></i> 別窓で開く
+                                                    </a>
+                                                </div>
+                                            ) : (
+                                                <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-2xl p-6 text-center">
+                                                    <i className="fa-solid fa-file-powerpoint text-4xl text-slate-700 mb-3"></i>
+                                                    <h3 className="text-sm font-bold text-slate-300">研修スライド資料は準備中です</h3>
+                                                    <p className="text-xs text-slate-500 mt-1">講師がGoogleスライドURLを登録すると、ここに自動で投影されます。</p>
+                                                </div>
+                                            )
+                                        ) : (
+                                            /* 板書カンバン閲覧 */
+                                            <div className="flex-1 overflow-x-auto overflow-y-hidden flex gap-3.5 pb-2">
+                                                {categories.map(cat => {
+                                                    const catCards = cards.filter(c => c.categoryId === cat.id);
+                                                    return (
+                                                        <div key={cat.id} className="w-72 shrink-0 flex flex-col bg-slate-800/90 rounded-2xl border border-slate-700 shadow-md overflow-hidden">
+                                                            <div className="p-3 border-b border-slate-700 bg-slate-800 flex items-center justify-between">
+                                                                <span className="font-bold text-xs text-white truncate">{cat.title}</span>
+                                                                <span className="bg-slate-900 text-slate-300 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">{catCards.length}</span>
+                                                            </div>
+                                                            {summaries[cat.id] && (
+                                                                <div className="p-2.5 bg-indigo-950/60 border-b border-indigo-800/40 text-[11px] text-indigo-200 flex items-start gap-1.5">
+                                                                    <i className="fa-solid fa-wand-magic-sparkles text-amber-300 mt-0.5 shrink-0"></i>
+                                                                    <p className="leading-snug">{summaries[cat.id]}</p>
+                                                                </div>
+                                                            )}
+                                                            <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+                                                                {catCards.map(c => (
+                                                                    <div key={c.id} className={`${c.color || 'sticky-yellow'} p-2.5 rounded-xl border shadow-xs flex flex-col justify-between gap-1`}>
+                                                                        <div className="flex items-center justify-between text-[9px]">
+                                                                            <span className="font-bold bg-black/10 px-1.5 py-0.2 rounded text-slate-800">{c.author || '受講者'}</span>
+                                                                            <button 
+                                                                                onClick={() => handleToggleVote(c.id)}
+                                                                                className={`px-1.5 py-0.2 rounded flex items-center gap-1 font-bold ${myVotes[c.id] ? 'bg-rose-500 text-white' : 'bg-white/80 text-slate-700'}`}>
+                                                                                <i className="fa-solid fa-heart text-rose-500"></i> {c.votes || 0}
+                                                                            </button>
+                                                                        </div>
+                                                                        <p className="text-xs font-medium text-slate-800 leading-snug break-words">{c.text}</p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* ➡ 右側パネル（40%幅・最大440px）：意見投稿フォーム ＆ タイムライン */}
+                                <div className="flex-[2] max-w-md flex flex-col h-full min-h-0 gap-3">
+                                    
+                                    {/* 📝 意見投稿フォーム */}
+                                    <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm shrink-0 flex flex-col gap-2.5">
+                                        <div className="flex items-center justify-between border-b border-slate-700/80 pb-2">
+                                            <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                <i className="fa-solid fa-pen-to-square text-indigo-400"></i>
+                                                意見を投稿する
+                                            </h3>
+                                            {isSubmissionsLocked && (
+                                                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                                                    <i className="fa-solid fa-lock text-[9px]"></i> 受付停止中
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[11px] font-bold text-slate-300 shrink-0">お名前/班:</span>
+                                            <div className="relative flex-1">
+                                                <input 
+                                                    type="text"
+                                                    value={participantName}
+                                                    onChange={(e) => handleParticipantNameChange(e.target.value)}
+                                                    placeholder="例: 山田 / A班"
+                                                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 pl-6"
+                                                />
+                                                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs">
+                                                    {getAvatarByName(participantName)}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                                            <span className="text-[10px] font-bold text-slate-400 shrink-0 mr-0.5">色:</span>
+                                            {COLOR_PALETTE.map((c) => (
+                                                <button
+                                                    key={c.id}
+                                                    type="button"
+                                                    onClick={() => setSelectedColor(c.id)}
+                                                    title={c.name}
+                                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition shrink-0 cursor-pointer ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow-sm ' + c.id : 'opacity-70 hover:opacity-100 ' + c.id}`}>
+                                                    {c.label}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        <form onSubmit={handleSendParticipantCard} className="flex flex-col gap-1.5">
+                                            <textarea
+                                                value={inputText}
+                                                onChange={(e) => setInputText(e.target.value)}
+                                                disabled={isSubmissionsLocked}
+                                                placeholder={isSubmissionsLocked ? "現在、講師により投稿受付が一時停止されています" : "あなたの意見や気づきを入力（Ctrl + Enterで送信）..."}
+                                                rows="2"
+                                                className={`w-full ${selectedColor} border rounded-xl p-2.5 text-xs placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-medium leading-snug transition ${isSubmissionsLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                onKeyDown={(e) => {
+                                                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                                        handleSendParticipantCard(e);
+                                                    }
+                                                }}
+                                            ></textarea>
+                                            <button
+                                                type="submit"
+                                                disabled={isSubmissionsLocked || !inputText.trim()}
+                                                className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow active:scale-95 cursor-pointer ${isSubmissionsLocked || !inputText.trim() ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-60' : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white'}`}>
+                                                <i className="fa-solid fa-paper-plane text-[10px]"></i>
+                                                <span>{isSubmissionsLocked ? '受付停止中' : 'ボードに意見を送信 (Enter)'}</span>
+                                            </button>
+                                        </form>
+                                    </div>
+
+                                    {/* 💬 リアルタイム意見タイムライン ＆ 投稿履歴 */}
+                                    <div className="bg-slate-800/95 rounded-2xl p-3 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 min-h-0 flex flex-col overflow-hidden">
+                                        <div className="flex items-center justify-between border-b border-slate-700/80 pb-2 mb-2 shrink-0">
+                                            <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                <i className="fa-solid fa-comments text-indigo-400"></i>
+                                                みんなの意見タイムライン
+                                                <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                                                    {cards.length} 件
+                                                </span>
+                                            </h3>
+                                            <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-700 text-[10px]">
+                                                <button 
+                                                    onClick={() => setTimelineSort('latest')}
+                                                    className={`px-1.5 py-0.5 rounded font-bold transition ${timelineSort === 'latest' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                                    新着順
+                                                </button>
+                                                <button 
+                                                    onClick={() => setTimelineSort('votes')}
+                                                    className={`px-1.5 py-0.5 rounded font-bold transition ${timelineSort === 'votes' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                                    いいね順
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {cards.length === 0 ? (
+                                            <div className="text-center py-8 border border-dashed border-slate-700 rounded-xl my-auto">
+                                                <p className="text-xs text-slate-400">まだ意見が投稿されていません</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2 flex-1 overflow-y-auto pr-1">
+                                                {cards
+                                                    .slice()
+                                                    .sort((a, b) => {
+                                                        if (timelineSort === 'votes') return (b.votes || 0) - (a.votes || 0);
+                                                        return 0;
+                                                    })
+                                                    .map((card) => {
+                                                        const hasVoted = !!myVotes[card.id];
+                                                        const category = categories.find(c => c.id === card.categoryId);
+                                                        return (
+                                                            <div 
+                                                                key={card.id} 
+                                                                className={`${card.color || 'sticky-yellow'} p-2.5 rounded-xl border shadow-xs flex flex-col justify-between gap-1 transition hover:shadow-sm`}>
+                                                                <div className="flex items-center justify-between gap-1.5">
+                                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                                        <span className="text-[9px] font-bold bg-black/10 text-slate-800 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                                                            <span>{getAvatarByName(card.author)}</span>
+                                                                            <span>{card.author || '受講者'}</span>
+                                                                        </span>
+                                                                        {category && (
+                                                                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-white">
+                                                                                {category.title}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                     <button
                                                                         onClick={() => handleToggleVote(card.id)}
-                                                                        title={isVoted ? "いいねを取り消す" : "この意見にいいね！"}
-                                                                        className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold transition active:scale-95 shrink-0 shadow-2xs ${isVoted ? 'bg-indigo-600 text-white ring-1 ring-indigo-400' : 'bg-white/80 hover:bg-white text-slate-800 hover:text-indigo-600'}`}>
-                                                                        <span>{isVoted ? '❤️' : '👍'}</span>
+                                                                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow-2xs border ${hasVoted ? 'bg-rose-500 text-white border-rose-600 scale-105' : 'bg-white/80 hover:bg-white text-slate-700 border-slate-300'}`}>
+                                                                        <i className={`fa-solid fa-heart ${hasVoted ? 'text-white' : 'text-rose-500'}`}></i>
                                                                         <span>{card.votes || 0}</span>
                                                                     </button>
                                                                 </div>
-
-                                                                {/* 本文（いいねバーを削除したので直下にスッキリ表示） */}
-                                                                <p className="text-xs font-medium leading-snug break-words text-slate-800">
+                                                                <p className="text-xs font-medium leading-relaxed break-words text-slate-800">
                                                                     {card.text}
                                                                 </p>
                                                             </div>
@@ -1986,44 +2230,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             </div>
                                         )}
                                     </div>
-                                ) : (
-                                    /* 📄 研修スライド（Googleスライド / PDF）スマホビュー */
-                                    <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 overflow-hidden">
-                                        <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700/80 shrink-0">
-                                            <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                                                <i className="fa-solid fa-file-powerpoint text-indigo-400"></i>
-                                                研修スライド資料
-                                            </h3>
-                                            {slideUrl && (
-                                                <a 
-                                                    href={slideUrl} 
-                                                    target="_blank" 
-                                                    rel="noreferrer"
-                                                    className="text-[10px] text-indigo-300 hover:text-white flex items-center gap-1 bg-indigo-900/60 px-2 py-0.5 rounded border border-indigo-700/50">
-                                                    <i className="fa-solid fa-up-right-from-square text-[9px]"></i> 別窓で開く
-                                                </a>
-                                            )}
-                                        </div>
-                                        {slideUrl ? (
-                                            <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700">
-                                                <iframe
-                                                    src={slideUrl}
-                                                    className="w-full h-full border-0"
-                                                    allowFullScreen={true}
-                                                    frameBorder="0"
-                                                ></iframe>
-                                            </div>
-                                        ) : (
-                                            <div className="text-center py-12 border border-dashed border-slate-700 rounded-xl my-auto p-4">
-                                                <i className="fa-solid fa-file-powerpoint text-3xl text-slate-600 mb-2"></i>
-                                                <p className="text-xs text-slate-300 font-bold">スライド資料は準備中です</p>
-                                                <p className="text-[10px] text-slate-400 mt-1">講師がGoogleスライドURLを設定すると、ここに自動で表示されます。</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                </div>
                             </div>
-                        </div>
+                        )
                     ) : (
         /* Facilitator Board View */
         <>
