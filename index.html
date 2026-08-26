@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.23.0)</title>
+    <title>研修ワークナビ AI (v1.23.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -73,7 +73,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.23.0";
+        const APP_VERSION = "v1.23.1";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -233,35 +233,31 @@
 
             const maxAllowedPage = pageEnd > 0 ? pageEnd : (totalPages || 5);
 
-            if (renderError) {
-                // フォールバック: 標準iframe表示
-                return (
-                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
-                        <iframe
-                            src={convertToEmbedUrl(slideUrl, pageStart)}
-                            className="w-full h-full border-0"
-                            allowFullScreen={true}
-                            frameBorder="0"
-                        ></iframe>
-                    </div>
-                );
-            }
-
             return (
                 <div className="flex-1 flex flex-col min-h-0 gap-2">
-                    {/* スライド描画領域 */}
-                    <div className="flex-1 w-full h-full rounded-xl overflow-auto bg-slate-950 border border-slate-700 flex items-center justify-center p-2 relative shadow-inner">
-                        {isLoading ? (
+                    {/* スライド描画領域（PDF.js または 高速iframe埋め込み） */}
+                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-slate-950 border border-slate-700 flex items-center justify-center relative shadow-inner">
+                        {renderError ? (
+                            <iframe
+                                key={`slide-frame-${currentPage}`}
+                                src={convertToEmbedUrl(slideUrl, currentPage)}
+                                className="w-full h-full border-0"
+                                allowFullScreen={true}
+                                frameBorder="0"
+                            ></iframe>
+                        ) : isLoading ? (
                             <div className="flex flex-col items-center gap-2 text-slate-400 py-12">
                                 <i className="fa-solid fa-circle-notch fa-spin text-3xl text-indigo-400"></i>
-                                <span className="text-xs font-bold">スライド資料を高画質展開中...</span>
+                                <span className="text-xs font-bold">スライド資料を読み込み中...</span>
                             </div>
                         ) : (
-                            <canvas ref={canvasRef} className="max-w-full max-h-full rounded-lg shadow-xl object-contain bg-white" />
+                            <div className="w-full h-full overflow-auto flex items-center justify-center p-2">
+                                <canvas ref={canvasRef} className="max-w-full max-h-full rounded-lg shadow-xl object-contain bg-white" />
+                            </div>
                         )}
                     </div>
 
-                    {/* 📱 受講者用ページ送りコントローラー */}
+                    {/* 📱 受講者用ページ送りコントローラー（常に下部に常駐） */}
                     <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 flex items-center justify-between shrink-0 shadow-inner">
                         <button
                             onClick={() => onPageChange(Math.max(pageStart, currentPage - 1))}
@@ -270,7 +266,7 @@
                             <i className="fa-solid fa-chevron-left text-[10px]"></i> 前へ
                         </button>
 
-                        {/* ページ番号ピル */}
+                        {/* ページ番号ピル（1P, 2P, 3P...） */}
                         <div className="flex items-center gap-1 overflow-x-auto py-0.5 px-1 max-w-[180px] sm:max-w-xs justify-center">
                             {(() => {
                                 const pills = [];
