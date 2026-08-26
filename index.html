@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.17.6)</title>
+    <title>板書・意見整理 AI (v1.17.7)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.17.6";
+        const APP_VERSION = "v1.17.7";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -472,7 +472,6 @@
 
                     peer.on('error', (err) => {
                         console.warn('Peer error:', err.type, err.message);
-                        // ホストIDが衝突していた場合はランダムIDで再試行
                         if (appRole === 'board' && (err.type === 'unavailable-id' || err.type === 'invalid-id')) {
                             const newRoomId = 'room-' + Math.random().toString(36).substring(2, 8);
                             localStorage.setItem('bansho_host_room_id', newRoomId);
@@ -486,6 +485,9 @@
                     if (appRole === 'board') {
                         peer.on('connection', (conn) => {
                             console.log('Host received new connection from:', conn.peer);
+                            
+                            // 同一クライアントの古い接続を除去して重複防止
+                            hostConnsRef.current = hostConnsRef.current.filter(c => c.peer !== conn.peer);
                             hostConnsRef.current.push(conn);
                             setConnectedCount(hostConnsRef.current.length);
 
@@ -506,7 +508,7 @@
                             });
 
                             conn.on('close', () => {
-                                hostConnsRef.current = hostConnsRef.current.filter(c => c !== conn);
+                                hostConnsRef.current = hostConnsRef.current.filter(c => c.peer !== conn.peer);
                                 setConnectedCount(hostConnsRef.current.length);
                             });
 
@@ -577,9 +579,21 @@
                 const p = peerInstance || peerRef.current;
                 const roomId = targetRoomId || activeRoomId;
                 if (!p || p.destroyed || !roomId) return;
+                
+                // すでに接続中（open）の場合はスキップ
+                if (connRef.current && connRef.current.open && connRef.current.peer === roomId) {
+                    setPeerConnected(true);
+                    return;
+                }
+
                 try {
+                    if (connRef.current) {
+                        try { connRef.current.close(); } catch (_) {}
+                    }
+
                     const conn = p.connect(roomId, { reliable: true });
                     connRef.current = conn;
+
                     conn.on('open', () => {
                         console.log('Connected to host:', roomId);
                         setPeerConnected(true);
@@ -654,7 +668,7 @@
             useEffect(() => {
                 if (appRole !== 'participant') return;
                 const interval = setInterval(() => {
-                    if (!peerConnected && peerRef.current && !peerRef.current.destroyed) {
+                    if (!peerConnected && peerRef.current && !peerRef.current.destroyed && !peerRef.current.disconnected) {
                         connectToHost();
                     }
                 }, 3000);
@@ -680,9 +694,9 @@
                 }
 
                 // コネクション未接続または切断時の再接続送信
-                if (peerRef.current && !peerRef.current.destroyed) {
+                if (peerRef.current && !peerRef.current.destroyed && activeRoomId) {
                     try {
-                        const conn = peerRef.current.connect(roomHostId, { reliable: true });
+                        const conn = peerRef.current.connect(activeRoomId, { reliable: true });
                         connRef.current = conn;
                         conn.on('open', () => {
                             setPeerConnected(true);
