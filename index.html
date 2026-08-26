@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.19.2)</title>
+    <title>研修ワークナビ AI (v1.19.3)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.19.2";
+        const APP_VERSION = "v1.19.3";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -261,10 +261,6 @@
                 localStorage.setItem('bansho_selected_color', selectedColor);
             }, [selectedColor]);
 
-            // お名前入力（アバター連動、色は手動選択したものを維持）
-            const handleParticipantNameChange = (name) => {
-                setParticipantName(name);
-            };
             const [draggedCardId, setDraggedCardId] = useState(null);
             const [viewMode, setViewMode] = useState('kanban');
             const [isAiProcessing, setIsAiProcessing] = useState(false);
@@ -284,7 +280,6 @@
             const [isAddingCategory, setIsAddingCategory] = useState(false);
             const [summaries, setSummaries] = useState({});
             const [toastMessage, setToastMessage] = useState(null);
-            const [peerConnected, setPeerConnected] = useState(false);
 
             // 📄 スライド資料（Googleスライド / PDF）State
             const [slideUrl, setSlideUrl] = useState(() => {
