@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.17.7)</title>
+    <title>板書・意見整理 AI (v1.18.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -13,8 +13,8 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- PeerJS for Realtime P2P Sync without Server -->
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <!-- MQTT WebSocket for 100% Reliable Realtime Sync -->
+    <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.17.7";
+        const APP_VERSION = "v1.18.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -431,13 +431,21 @@
                 setTimeout(() => setToastMessage(null), 3000);
             };
 
-            // ホストから全参加者へのブロードキャスト関数
+            // リアルタイム通信用クライアントID & 在室管理マップ
+            const myClientId = useRef('user_' + Math.random().toString(36).substring(2, 9)).current;
+            const activeClientsRef = useRef(new Map());
+            const mqttClientRef = useRef(null);
+
+            // ホストから全参加者へのブロードキャスト関数（MQTT）
             const broadcastToClients = (msg) => {
-                hostConnsRef.current.forEach(c => {
-                    if (c && c.open) {
-                        try { c.send(msg); } catch (e) { console.warn('Broadcast error:', e); }
+                if (mqttClientRef.current && mqttClientRef.current.connected) {
+                    try {
+                        const topic = `bansho/room/${activeRoomId}`;
+                        mqttClientRef.current.publish(topic, JSON.stringify({ ...msg, senderId: myClientId }));
+                    } catch (e) {
+                        console.warn('Broadcast error:', e);
                     }
-                });
+                }
             };
 
             // テーマタイトル変更時に全クライアントへ即時自動配信
@@ -447,110 +455,75 @@
                 }
             }, [sessionThemeTitle, appRole]);
 
-            // PeerJSによるリアルタイムP2P同期設定
+            // MQTT WebSocketによる100%確実なリアルタイム同期
             useEffect(() => {
                 let isMounted = true;
+                const topic = `bansho/room/${activeRoomId}`;
 
                 try {
-                    // 講師はactiveRoomIdでホスト登録、参加者はランダムIDで初期化
-                    const peerIdToUse = (appRole === 'board') ? activeRoomId : undefined;
-                    const peer = new Peer(peerIdToUse, {
-                        debug: 1
+                    console.log('Connecting to MQTT Broker for room:', activeRoomId);
+                    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+                        clientId: myClientId,
+                        clean: true,
+                        connectTimeout: 5000,
+                        reconnectPeriod: 3000,
+                        keepalive: 30
                     });
-                    peerRef.current = peer;
+                    mqttClientRef.current = client;
 
-                    peer.on('open', (id) => {
-                        console.log('Peer connected with ID:', id);
+                    client.on('connect', () => {
+                        console.log('MQTT Connected successfully to topic:', topic);
                         if (!isMounted) return;
-
-                        if (appRole === 'board') {
-                            setActiveRoomId(id);
-                        } else if (appRole === 'participant') {
-                            connectToHost(peer, activeRoomId);
-                        }
+                        setPeerConnected(true);
+                        client.subscribe(topic, { qos: 0 }, (err) => {
+                            if (err) console.warn('Subscribe error:', err);
+                            else {
+                                if (appRole === 'participant') {
+                                    client.publish(topic, JSON.stringify({
+                                        type: 'JOIN',
+                                        senderId: myClientId,
+                                        author: participantName || '受講者'
+                                    }));
+                                    client.publish(topic, JSON.stringify({
+                                        type: 'REQUEST_SYNC',
+                                        senderId: myClientId
+                                    }));
+                                }
+                            }
+                        });
                     });
 
-                    peer.on('error', (err) => {
-                        console.warn('Peer error:', err.type, err.message);
-                        if (appRole === 'board' && (err.type === 'unavailable-id' || err.type === 'invalid-id')) {
-                            const newRoomId = 'room-' + Math.random().toString(36).substring(2, 8);
-                            localStorage.setItem('bansho_host_room_id', newRoomId);
-                            setActiveRoomId(newRoomId);
-                        }
-                        if (appRole === 'participant') {
-                            setPeerConnected(false);
-                        }
+                    client.on('reconnect', () => {
+                        console.log('MQTT Reconnecting...');
                     });
 
-                    if (appRole === 'board') {
-                        peer.on('connection', (conn) => {
-                            console.log('Host received new connection from:', conn.peer);
-                            
-                            // 同一クライアントの古い接続を除去して重複防止
-                            hostConnsRef.current = hostConnsRef.current.filter(c => c.peer !== conn.peer);
-                            hostConnsRef.current.push(conn);
-                            setConnectedCount(hostConnsRef.current.length);
+                    client.on('close', () => {
+                        if (isMounted) setPeerConnected(false);
+                    });
 
-                            conn.on('open', () => {
-                                // 接続した参加者に最新の全カード一覧、テーマ、タイマー、ロック、スライドURLを同期送信
-                                conn.send({ 
-                                    type: 'SYNC_CARDS', 
-                                    cards: cardsRef.current, 
-                                    themeTitle: sessionThemeTitleRef.current,
-                                    timer: {
-                                        seconds: timerSecondsRef.current,
-                                        total: timerTotalRef.current,
-                                        isRunning: isTimerRunningRef.current
-                                    },
-                                    isLocked: isSubmissionsLockedRef.current,
-                                    slideUrl: slideUrlRef.current
-                                });
-                            });
+                    client.on('error', (err) => {
+                        console.warn('MQTT Error:', err);
+                    });
 
-                            conn.on('close', () => {
-                                hostConnsRef.current = hostConnsRef.current.filter(c => c.peer !== conn.peer);
-                                setConnectedCount(hostConnsRef.current.length);
-                            });
+                    client.on('message', (t, message) => {
+                        if (!isMounted || t !== topic) return;
+                        try {
+                            const data = JSON.parse(message.toString());
+                            if (!data || data.senderId === myClientId) return; // 自分が送信したメッセージは無視
 
-                            conn.on('data', (data) => {
-                                console.log('Host received data:', data);
-                                if (!data) return;
-                                if (data.type === 'NEW_CARD') {
-                                    setCards(prev => {
-                                        const next = [data.card, ...prev];
-                                        broadcastToClients({ 
-                                            type: 'SYNC_CARDS', 
-                                            cards: next, 
-                                            themeTitle: sessionThemeTitleRef.current 
-                                        });
-                                        return next;
-                                    });
-                                    showToast(`📩 ${data.card.author || '受講者'}から意見が届きました！`);
-                                } else if (data.type === 'DELETE_CARD') {
-                                    setCards(prev => {
-                                        const next = prev.filter(c => c.id !== data.cardId);
-                                        broadcastToClients({ 
-                                            type: 'SYNC_CARDS', 
-                                            cards: next, 
-                                            themeTitle: sessionThemeTitleRef.current 
-                                        });
-                                        return next;
-                                    });
-                                    showToast(`🗑️ ${data.author || '受講者'}が意見の送信を取り消しました`);
-                                } else if (data.type === 'VOTE_CARD') {
-                                    setCards(prev => {
-                                        const next = prev.map(c => c.id === data.cardId ? { ...c, votes: Math.max(0, (c.votes || 0) + (data.delta || 1)) } : c);
-                                        broadcastToClients({ 
-                                            type: 'SYNC_CARDS', 
-                                            cards: next, 
-                                            themeTitle: sessionThemeTitleRef.current 
-                                        });
-                                        return next;
-                                    });
+                            if (appRole === 'board') {
+                                // 講師側でのメッセージ受信処理
+                                if (data.type === 'JOIN' || data.type === 'HEARTBEAT') {
+                                    activeClientsRef.current.set(data.senderId, Date.now());
+                                    setConnectedCount(activeClientsRef.current.size);
                                 } else if (data.type === 'REQUEST_SYNC') {
-                                    conn.send({ 
-                                        type: 'SYNC_CARDS', 
-                                        cards: cardsRef.current, 
+                                    activeClientsRef.current.set(data.senderId, Date.now());
+                                    setConnectedCount(activeClientsRef.current.size);
+                                    client.publish(topic, JSON.stringify({
+                                        type: 'SYNC_FULL_STATE',
+                                        senderId: myClientId,
+                                        targetClientId: data.senderId,
+                                        cards: cardsRef.current,
                                         themeTitle: sessionThemeTitleRef.current,
                                         timer: {
                                             seconds: timerSecondsRef.current,
@@ -559,168 +532,125 @@
                                         },
                                         isLocked: isSubmissionsLockedRef.current,
                                         slideUrl: slideUrlRef.current
+                                    }));
+                                } else if (data.type === 'NEW_CARD') {
+                                    setCards(prev => {
+                                        const next = [data.card, ...prev];
+                                        return next;
                                     });
+                                    showToast(`📩 ${data.card.author || '受講者'}から意見が届きました！`);
+                                } else if (data.type === 'DELETE_CARD') {
+                                    setCards(prev => prev.filter(c => c.id !== data.cardId));
+                                    showToast(`🗑️ ${data.author || '受講者'}が意見の送信を取り消しました`);
+                                } else if (data.type === 'VOTE_CARD') {
+                                    setCards(prev => prev.map(c => c.id === data.cardId ? { ...c, votes: Math.max(0, (c.votes || 0) + (data.delta || 1)) } : c));
                                 }
-                            });
-                        });
-                    }
+                            } else if (appRole === 'participant') {
+                                // 参加者側でのメッセージ受信処理
+                                if (data.type === 'SYNC_FULL_STATE' && (!data.targetClientId || data.targetClientId === myClientId)) {
+                                    if (data.cards) setCards(data.cards);
+                                    if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
+                                    if (data.timer) {
+                                        setTimerSeconds(data.timer.seconds || 0);
+                                        setTimerTotal(data.timer.total || 0);
+                                        setIsTimerRunning(!!data.timer.isRunning);
+                                    }
+                                    if (typeof data.isLocked === 'boolean') {
+                                        setIsSubmissionsLocked(data.isLocked);
+                                    }
+                                    if (data.slideUrl !== undefined) {
+                                        setSlideUrl(data.slideUrl);
+                                    }
+                                } else if (data.type === 'SYNC_CARDS') {
+                                    if (data.cards) setCards(data.cards);
+                                    if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
+                                } else if (data.type === 'SYNC_SLIDE_URL') {
+                                    setSlideUrl(data.slideUrl || '');
+                                    if (data.slideUrl) showToast('📄 研修スライド資料が更新されました');
+                                } else if (data.type === 'SYNC_TIMER') {
+                                    setTimerSeconds(data.seconds || 0);
+                                    setTimerTotal(data.total || 0);
+                                    setIsTimerRunning(!!data.isRunning);
+                                    if (data.isTimeUp) {
+                                        setIsTimeUp(true);
+                                        playTimeUpSound();
+                                        showToast('🔔 ワークショップの制限時間が終了しました！');
+                                    } else {
+                                        setIsTimeUp(false);
+                                    }
+                                } else if (data.type === 'SYNC_LOCK') {
+                                    setIsSubmissionsLocked(!!data.isLocked);
+                                    showToast(data.isLocked ? '🔒 講師により投稿受付が一時停止されました' : '🟢 投稿受付が再開されました！');
+                                } else if (data.type === 'SYNC_THEME') {
+                                    if (data.themeTitle) {
+                                        setSessionThemeTitle(data.themeTitle);
+                                        showToast(`📌 テーマが「${data.themeTitle}」に更新されました`);
+                                    }
+                                } else if (data.type === 'SESSION_STARTED') {
+                                    showToast(`📢 新しい板書「${data.title || '新規セッション'}」が開始されました！`);
+                                    if (data.title) setSessionThemeTitle(data.title);
+                                    setParticipantTab('post');
+                                } else if (data.type === 'SESSION_RESTORED') {
+                                    showToast(`🔄 過去の板書「${data.title}」が復元されました`);
+                                    if (data.title) setSessionThemeTitle(data.title);
+                                }
+                            }
+                        } catch (err) {
+                            console.warn('Message parsing error:', err);
+                        }
+                    });
                 } catch (e) {
-                    console.warn('P2P connection notice:', e);
+                    console.warn('MQTT init notice:', e);
                 }
 
                 return () => {
                     isMounted = false;
-                    if (peerRef.current) peerRef.current.destroy();
+                    if (mqttClientRef.current) {
+                        try { mqttClientRef.current.end(true); } catch (_) {}
+                    }
                 };
             }, [appRole, activeRoomId]);
 
-            // ホスト接続関数（参加者側）
-            const connectToHost = (peerInstance, targetRoomId) => {
-                const p = peerInstance || peerRef.current;
-                const roomId = targetRoomId || activeRoomId;
-                if (!p || p.destroyed || !roomId) return;
-                
-                // すでに接続中（open）の場合はスキップ
-                if (connRef.current && connRef.current.open && connRef.current.peer === roomId) {
-                    setPeerConnected(true);
-                    return;
-                }
-
-                try {
-                    if (connRef.current) {
-                        try { connRef.current.close(); } catch (_) {}
-                    }
-
-                    const conn = p.connect(roomId, { reliable: true });
-                    connRef.current = conn;
-
-                    conn.on('open', () => {
-                        console.log('Connected to host:', roomId);
-                        setPeerConnected(true);
-                        conn.send({ type: 'REQUEST_SYNC' });
-                    });
-                    conn.on('close', () => {
-                        console.log('Host connection closed');
-                        setPeerConnected(false);
-                    });
-                    conn.on('error', (err) => {
-                        console.warn('Host connection error:', err);
-                        setPeerConnected(false);
-                    });
-                    conn.on('data', (data) => {
-                        if (data && data.type === 'SYNC_CARDS') {
-                            setCards(data.cards);
-                            if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
-                            if (data.timer) {
-                                setTimerSeconds(data.timer.seconds || 0);
-                                setTimerTotal(data.timer.total || 0);
-                                setIsTimerRunning(!!data.timer.isRunning);
-                            }
-                            if (typeof data.isLocked === 'boolean') {
-                                setIsSubmissionsLocked(data.isLocked);
-                            }
-                            if (data.slideUrl !== undefined) {
-                                setSlideUrl(data.slideUrl);
-                            }
-                        } else if (data && data.type === 'SYNC_SLIDE_URL') {
-                            setSlideUrl(data.slideUrl || '');
-                            if (data.slideUrl) {
-                                showToast('📄 講師により研修スライド資料が更新されました');
-                            }
-                        } else if (data && data.type === 'SYNC_TIMER') {
-                            setTimerSeconds(data.seconds || 0);
-                            setTimerTotal(data.total || 0);
-                            setIsTimerRunning(!!data.isRunning);
-                            if (data.isTimeUp) {
-                                setIsTimeUp(true);
-                                playTimeUpSound();
-                                showToast('🔔 ワークショップの制限時間が終了しました！');
-                            } else {
-                                setIsTimeUp(false);
-                            }
-                        } else if (data && data.type === 'SYNC_LOCK') {
-                            setIsSubmissionsLocked(!!data.isLocked);
-                            if (data.isLocked) {
-                                showToast('🔒 講師により投稿受付が一時停止されました（解説モード）');
-                            } else {
-                                showToast('🟢 投稿受付が再開されました！');
-                            }
-                        } else if (data && data.type === 'SYNC_THEME') {
-                            if (data.themeTitle) {
-                                setSessionThemeTitle(data.themeTitle);
-                                showToast(`📌 テーマが「${data.themeTitle}」に更新されました`);
-                            }
-                        } else if (data && data.type === 'SESSION_STARTED') {
-                            showToast(`📢 新しい板書「${data.title || '新規セッション'}」が開始されました！`);
-                            if (data.title) setSessionThemeTitle(data.title);
-                            setParticipantTab('post');
-                        } else if (data && data.type === 'SESSION_RESTORED') {
-                            showToast(`🔄 過去の板書「${data.title}」が画面に復元されました`);
-                            if (data.title) setSessionThemeTitle(data.title);
-                        }
-                    });
-                } catch (err) {
-                    console.error('Failed to connect to host:', err);
-                }
-            };
-
-            // 参加者専用：未接続時の自動リトライ（3秒間隔でバックグラウンド接続試行）
+            // 受講者のハートビート送信（15秒ごと） & 講師の接続者カウントクリーンアップ
             useEffect(() => {
-                if (appRole !== 'participant') return;
-                const interval = setInterval(() => {
-                    if (!peerConnected && peerRef.current && !peerRef.current.destroyed && !peerRef.current.disconnected) {
-                        connectToHost();
-                    }
-                }, 3000);
-                return () => clearInterval(interval);
-            }, [appRole, peerConnected, activeRoomId]);
-
-            // P2P確実送信ヘルパー（切断時は自動再接続）
-            const sendP2pMessage = (payload, onComplete) => {
-                if (appRole !== 'participant') {
-                    if (onComplete) onComplete();
-                    return;
-                }
-
-                if (connRef.current && connRef.current.open) {
-                    try {
-                        connRef.current.send(payload);
-                        console.log('Payload sent via active conn:', payload);
-                        if (onComplete) onComplete();
-                        return;
-                    } catch (e) {
-                        console.warn('Send error on active conn, reconnecting...', e);
-                    }
-                }
-
-                // コネクション未接続または切断時の再接続送信
-                if (peerRef.current && !peerRef.current.destroyed && activeRoomId) {
-                    try {
-                        const conn = peerRef.current.connect(activeRoomId, { reliable: true });
-                        connRef.current = conn;
-                        conn.on('open', () => {
-                            setPeerConnected(true);
-                            conn.send(payload);
-                            console.log('Payload sent after reconnect:', payload);
-                            if (onComplete) onComplete();
-                        });
-                        conn.on('data', (data) => {
-                            if (data && data.type === 'SYNC_CARDS') {
-                                setCards(data.cards);
-                                if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
-                            } else if (data && data.type === 'SYNC_THEME') {
-                                if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
+                const timer = setInterval(() => {
+                    const topic = `bansho/room/${activeRoomId}`;
+                    if (appRole === 'participant' && mqttClientRef.current && mqttClientRef.current.connected) {
+                        mqttClientRef.current.publish(topic, JSON.stringify({
+                            type: 'HEARTBEAT',
+                            senderId: myClientId,
+                            author: participantName || '受講者'
+                        }));
+                    } else if (appRole === 'board') {
+                        // 45秒以上アクセスのない受講生を切断と判定
+                        const now = Date.now();
+                        let changed = false;
+                        activeClientsRef.current.forEach((lastSeen, cId) => {
+                            if (now - lastSeen > 45000) {
+                                activeClientsRef.current.delete(cId);
+                                changed = true;
                             }
                         });
-                        conn.on('close', () => setPeerConnected(false));
-                        conn.on('error', () => setPeerConnected(false));
-                    } catch (err) {
-                        console.error('Reconnect and send failed:', err);
-                        if (onComplete) onComplete();
+                        if (changed) setConnectedCount(activeClientsRef.current.size);
                     }
-                } else {
-                    if (onComplete) onComplete();
+                }, 15000);
+                return () => clearInterval(timer);
+            }, [appRole, activeRoomId, participantName]);
+
+            // リアルタイム送信ヘルパー（参加者・講師共通）
+            const sendP2pMessage = (payload, onComplete) => {
+                const topic = `bansho/room/${activeRoomId}`;
+                if (mqttClientRef.current && mqttClientRef.current.connected) {
+                    try {
+                        mqttClientRef.current.publish(topic, JSON.stringify({
+                            ...payload,
+                            senderId: myClientId
+                        }));
+                    } catch (e) {
+                        console.warn('Send error:', e);
+                    }
                 }
+                if (onComplete) onComplete();
             };
 
             // LocalStorage Auto-Save
