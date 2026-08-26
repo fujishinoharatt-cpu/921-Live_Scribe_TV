@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.21.3)</title>
+    <title>研修ワークナビ AI (v1.22.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.21.3";
+        const APP_VERSION = "v1.22.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -114,32 +114,31 @@
             return COLOR_PALETTE[index].id;
         };
 
-        // GoogleスライドURLまたはWeb/PDF URLを特定ページ番号の埋め込み用URLに変換するヘルパー
-        const getEmbedUrlForSlide = (rawUrl, pageNum = 1) => {
+        // GoogleスライドURLまたはWeb/PDF URLを埋め込み用URLに自動変換するヘルパー
+        const convertToEmbedUrl = (rawUrl, pageStart = 1) => {
             if (!rawUrl || !rawUrl.trim()) return '';
             const url = rawUrl.trim();
-            const p = Math.max(1, parseInt(pageNum, 10) || 1);
+            const startNum = parseInt(pageStart, 10) || 1;
             
-            // Google Slides:
+            // Google Slides: https://docs.google.com/presentation/d/{ID}/edit... -> /embed
             const gslideMatch = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
             if (gslideMatch && gslideMatch[1]) {
                 const id = gslideMatch[1];
-                // Google Slides embed with start page & minimal UI
-                return `https://docs.google.com/presentation/d/${id}/embed?start=false&loop=false&delayms=60000&rm=minimal&slide=${p}#page=${p}`;
+                return `https://docs.google.com/presentation/d/${id}/embed?start=false&loop=false&delayms=3000`;
             }
             
-            // Google Drive PDF:
+            // Google Drive PDF: https://drive.google.com/file/d/{ID}/view -> /preview
             const gdriveMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
             if (gdriveMatch && gdriveMatch[1]) {
                 const id = gdriveMatch[1];
-                return `https://drive.google.com/file/d/${id}/preview#page=${p}`;
+                return `https://drive.google.com/file/d/${id}/preview`;
             }
             
             return url;
         };
 
-        const convertToEmbedUrl = (rawUrl, pageStart = 1) => {
-            return getEmbedUrlForSlide(rawUrl, pageStart);
+        const getEmbedUrlForSlide = (rawUrl) => {
+            return convertToEmbedUrl(rawUrl);
         };
 
         const INITIAL_CATEGORIES = [
@@ -2010,68 +2009,13 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             </div>
 
                                             {slideUrl ? (
-                                                <div className="flex-1 flex flex-col min-h-0 gap-2">
-                                                    {/* スライド本体（透明カバーでGoogle内部クリックを完全遮断） */}
-                                                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
-                                                        <iframe
-                                                            key={`slide-${participantSlidePage}`}
-                                                            src={getEmbedUrlForSlide(slideUrl, participantSlidePage)}
-                                                            className="w-full h-full border-0"
-                                                            allowFullScreen={true}
-                                                            frameBorder="0"
-                                                        ></iframe>
-                                                        {/* 🛡️ クリック先読み防止透明レイヤー（Google純正操作を100%無効化） */}
-                                                        <div 
-                                                            className="absolute inset-0 bg-transparent z-10 select-none cursor-default"
-                                                            title="スライドの切り替えは下のボタンをご利用ください"
-                                                        />
-                                                    </div>
-
-                                                    {/* 📱 受講者用ページ送りコントローラー（指定範囲外への先読みを物理ブロック） */}
-                                                    <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 flex flex-col gap-1.5 shrink-0 shadow-inner">
-                                                        <div className="flex items-center justify-between gap-1">
-                                                            <button
-                                                                onClick={handleParticipantPrevSlide}
-                                                                disabled={participantSlidePage <= slidePageStart}
-                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer shrink-0">
-                                                                <i className="fa-solid fa-chevron-left text-[10px]"></i> 前へ
-                                                            </button>
-
-                                                            {/* ページ番号直接選択ピル */}
-                                                            <div className="flex items-center gap-1 overflow-x-auto py-0.5 px-1 max-w-[180px] sm:max-w-xs justify-center">
-                                                                {(() => {
-                                                                    const maxP = slidePageEnd > 0 ? slidePageEnd : Math.max(5, participantSlidePage + 2);
-                                                                    const pills = [];
-                                                                    for (let p = slidePageStart; p <= maxP; p++) {
-                                                                        pills.push(
-                                                                            <button
-                                                                                key={`pill-${p}`}
-                                                                                onClick={() => setParticipantSlidePage(p)}
-                                                                                className={`px-2 py-1 rounded-lg text-xs font-bold font-mono transition shrink-0 ${participantSlidePage === p ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-                                                                                {p}P
-                                                                            </button>
-                                                                        );
-                                                                    }
-                                                                    return pills;
-                                                                })()}
-                                                            </div>
-
-                                                            <button
-                                                                onClick={handleParticipantNextSlide}
-                                                                disabled={slidePageEnd > 0 && participantSlidePage >= slidePageEnd}
-                                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shrink-0 ${slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50 opacity-80 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow'}`}>
-                                                                {slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? (
-                                                                    <>
-                                                                        <i className="fa-solid fa-lock text-[10px]"></i> 制限中
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        次へ <i className="fa-solid fa-chevron-right text-[10px]"></i>
-                                                                    </>
-                                                                )}
-                                                            </button>
-                                                        </div>
-                                                    </div>
+                                                <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700">
+                                                    <iframe
+                                                        src={slideUrl}
+                                                        className="w-full h-full border-0"
+                                                        allowFullScreen={true}
+                                                        frameBorder="0"
+                                                    ></iframe>
                                                 </div>
                                             ) : (
                                                 <div className="text-center py-12 border border-dashed border-slate-700 rounded-xl my-auto p-4">
@@ -2137,65 +2081,20 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         {participantPcTab === 'slide' ? (
                                             /* スライド埋め込み */
                                             slideUrl ? (
-                                                <div className="flex-1 flex flex-col min-h-0 gap-2">
-                                                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
-                                                        <iframe
-                                                            key={`pc-slide-${participantSlidePage}`}
-                                                            src={getEmbedUrlForSlide(slideUrl, participantSlidePage)}
-                                                            className="w-full h-full border-0"
-                                                            allowFullScreen={true}
-                                                            frameBorder="0"
-                                                        ></iframe>
-                                                        {/* 🛡️ クリック先読み防止透明レイヤー */}
-                                                        <div 
-                                                            className="absolute inset-0 bg-transparent z-10 select-none cursor-default"
-                                                            title="スライドの切り替えは下のボタンをご利用ください"
-                                                        />
-                                                    </div>
-
-                                                    {/* 💻 PC受講者用ページ送りコントローラー */}
-                                                    <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between shrink-0">
-                                                        <button
-                                                            onClick={handleParticipantPrevSlide}
-                                                            disabled={participantSlidePage <= slidePageStart}
-                                                            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 transition flex items-center gap-1.5 cursor-pointer">
-                                                            <i className="fa-solid fa-chevron-left text-[10px]"></i> 前のスライド
-                                                        </button>
-
-                                                        {/* ページ番号ピル */}
-                                                        <div className="flex items-center gap-1.5">
-                                                            {(() => {
-                                                                const maxP = slidePageEnd > 0 ? slidePageEnd : Math.max(5, participantSlidePage + 2);
-                                                                const pills = [];
-                                                                for (let p = slidePageStart; p <= maxP; p++) {
-                                                                    pills.push(
-                                                                        <button
-                                                                            key={`pc-pill-${p}`}
-                                                                            onClick={() => setParticipantSlidePage(p)}
-                                                                            className={`px-3 py-1 rounded-xl text-xs font-bold font-mono transition ${participantSlidePage === p ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-                                                                            {p} ページ
-                                                                        </button>
-                                                                    );
-                                                                }
-                                                                return pills;
-                                                            })()}
-                                                        </div>
-
-                                                        <button
-                                                            onClick={handleParticipantNextSlide}
-                                                            disabled={slidePageEnd > 0 && participantSlidePage >= slidePageEnd}
-                                                            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50 opacity-80 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow'}`}>
-                                                            {slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? (
-                                                                <>
-                                                                    <i className="fa-solid fa-lock text-[10px]"></i> これ以降は制限中
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    次のスライド <i className="fa-solid fa-chevron-right text-[10px]"></i>
-                                                                </>
-                                                            )}
-                                                        </button>
-                                                    </div>
+                                                <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
+                                                    <iframe
+                                                        src={slideUrl}
+                                                        className="w-full h-full border-0"
+                                                        allowFullScreen={true}
+                                                        frameBorder="0"
+                                                    ></iframe>
+                                                    <a 
+                                                        href={slideUrl} 
+                                                        target="_blank" 
+                                                        rel="noreferrer"
+                                                        className="absolute top-3 right-3 bg-slate-900/80 hover:bg-slate-900 text-indigo-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-700 shadow-md backdrop-blur-sm flex items-center gap-1.5 transition">
+                                                        <i className="fa-solid fa-up-right-from-square text-[10px]"></i> 別窓で開く
+                                                    </a>
                                                 </div>
                                             ) : (
                                                 <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-2xl p-6 text-center">
