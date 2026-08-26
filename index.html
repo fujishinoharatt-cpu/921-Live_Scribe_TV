@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>板書・意見整理 AI (v1.7.1)</title>
+    <title>板書・意見整理 AI (v1.7.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -53,7 +53,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.7.1";
+        const APP_VERSION = "v1.7.2";
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -447,6 +447,31 @@
                     broadcastToClients({ type: 'SYNC_THEME', themeTitle: title });
                 }
                 showToast(`📌 テーマを「${title}」に変更しました`);
+            };
+
+            // 💾 現在の作業中板書をそのままアーカイブ保存（画面はクリアしない）
+            const handleSaveCurrentSnapshot = () => {
+                if (cards.length === 0) {
+                    showToast('保存する付箋意見がありません！');
+                    return;
+                }
+                const now = new Date();
+                const timeStr = `${now.getFullYear()}/${(now.getMonth()+1).toString().padStart(2,'0')}/${now.getDate().toString().padStart(2,'0')} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+                const finalTitle = sessionThemeTitle.trim() || `${timeStr} セッション`;
+
+                const newArchive = {
+                    id: 'arch-' + Date.now(),
+                    title: finalTitle,
+                    savedAt: timeStr,
+                    cards: [...cards],
+                    categories: [...categories],
+                    summaries: { ...summaries },
+                    cardCount: cards.length,
+                    totalVotes: cards.reduce((sum, c) => sum + (c.votes || 0), 0)
+                };
+
+                setArchives(prev => [newArchive, ...prev]);
+                showToast(`💾「${finalTitle}」を過去の記録に保存しました！（${cards.length}件）`);
             };
 
             // 新規板書モーダルを開く
@@ -1050,6 +1075,14 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
 
                             {appRole === 'board' && !isParticipantOnly && (
                                 <>
+                                    <button 
+                                        onClick={handleSaveCurrentSnapshot}
+                                        title="現在の板書をそのまま過去の記録に保存（画面はクリアされません）"
+                                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
+                                        <i className="fa-solid fa-floppy-disk text-indigo-200"></i>
+                                        💾 板書を保存
+                                    </button>
+
                                     <button 
                                         onClick={handleOpenNewBoardModal}
                                         title="現在の板書を保存して新しい板書を開始"
