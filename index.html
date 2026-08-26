@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.21.2)</title>
+    <title>研修ワークナビ AI (v1.21.3)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -66,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.21.2";
+        const APP_VERSION = "v1.21.3";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -119,16 +119,22 @@
             if (!rawUrl || !rawUrl.trim()) return '';
             const url = rawUrl.trim();
             const p = Math.max(1, parseInt(pageNum, 10) || 1);
-            // Google Slides: https://docs.google.com/presentation/d/{ID}/edit... -> /embed?rm=minimal&slide=id.p{p}
+            
+            // Google Slides:
             const gslideMatch = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
             if (gslideMatch && gslideMatch[1]) {
-                return `https://docs.google.com/presentation/d/${gslideMatch[1]}/embed?start=false&loop=false&delayms=60000&rm=minimal&slide=id.p${p}`;
+                const id = gslideMatch[1];
+                // Google Slides embed with start page & minimal UI
+                return `https://docs.google.com/presentation/d/${id}/embed?start=false&loop=false&delayms=60000&rm=minimal&slide=${p}#page=${p}`;
             }
-            // Google Drive PDF: https://drive.google.com/file/d/{ID}/view -> /preview#page={p}
+            
+            // Google Drive PDF:
             const gdriveMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
             if (gdriveMatch && gdriveMatch[1]) {
-                return `https://drive.google.com/file/d/${gdriveMatch[1]}/preview#page=${p}`;
+                const id = gdriveMatch[1];
+                return `https://drive.google.com/file/d/${id}/preview#page=${p}`;
             }
+            
             return url;
         };
 
@@ -2022,36 +2028,49 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                     </div>
 
                                                     {/* 📱 受講者用ページ送りコントローラー（指定範囲外への先読みを物理ブロック） */}
-                                                    <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 flex items-center justify-between shrink-0 shadow-inner">
-                                                        <button
-                                                            onClick={handleParticipantPrevSlide}
-                                                            disabled={participantSlidePage <= slidePageStart}
-                                                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer">
-                                                            <i className="fa-solid fa-chevron-left text-[10px]"></i> 前へ
-                                                        </button>
+                                                    <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 flex flex-col gap-1.5 shrink-0 shadow-inner">
+                                                        <div className="flex items-center justify-between gap-1">
+                                                            <button
+                                                                onClick={handleParticipantPrevSlide}
+                                                                disabled={participantSlidePage <= slidePageStart}
+                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer shrink-0">
+                                                                <i className="fa-solid fa-chevron-left text-[10px]"></i> 前へ
+                                                            </button>
 
-                                                        <div className="flex items-center gap-1.5">
-                                                            <span className="text-xs font-black text-white font-mono bg-indigo-950 px-2.5 py-1 rounded-lg border border-indigo-700/60 flex items-center gap-1">
-                                                                <span>{participantSlidePage}</span>
-                                                                <span className="text-indigo-400 font-normal">/</span>
-                                                                <span className="text-indigo-300">{slidePageEnd > 0 ? `${slidePageEnd}P` : '全P'}</span>
-                                                            </span>
+                                                            {/* ページ番号直接選択ピル */}
+                                                            <div className="flex items-center gap-1 overflow-x-auto py-0.5 px-1 max-w-[180px] sm:max-w-xs justify-center">
+                                                                {(() => {
+                                                                    const maxP = slidePageEnd > 0 ? slidePageEnd : Math.max(5, participantSlidePage + 2);
+                                                                    const pills = [];
+                                                                    for (let p = slidePageStart; p <= maxP; p++) {
+                                                                        pills.push(
+                                                                            <button
+                                                                                key={`pill-${p}`}
+                                                                                onClick={() => setParticipantSlidePage(p)}
+                                                                                className={`px-2 py-1 rounded-lg text-xs font-bold font-mono transition shrink-0 ${participantSlidePage === p ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                                                                                {p}P
+                                                                            </button>
+                                                                        );
+                                                                    }
+                                                                    return pills;
+                                                                })()}
+                                                            </div>
+
+                                                            <button
+                                                                onClick={handleParticipantNextSlide}
+                                                                disabled={slidePageEnd > 0 && participantSlidePage >= slidePageEnd}
+                                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shrink-0 ${slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50 opacity-80 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow'}`}>
+                                                                {slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? (
+                                                                    <>
+                                                                        <i className="fa-solid fa-lock text-[10px]"></i> 制限中
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        次へ <i className="fa-solid fa-chevron-right text-[10px]"></i>
+                                                                    </>
+                                                                )}
+                                                            </button>
                                                         </div>
-
-                                                        <button
-                                                            onClick={handleParticipantNextSlide}
-                                                            disabled={slidePageEnd > 0 && participantSlidePage >= slidePageEnd}
-                                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50 opacity-80 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow'}`}>
-                                                            {slidePageEnd > 0 && participantSlidePage >= slidePageEnd ? (
-                                                                <>
-                                                                    <i className="fa-solid fa-lock text-[10px]"></i> 制限中
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    次へ <i className="fa-solid fa-chevron-right text-[10px]"></i>
-                                                                </>
-                                                            )}
-                                                        </button>
                                                     </div>
                                                 </div>
                                             ) : (
@@ -2143,13 +2162,23 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             <i className="fa-solid fa-chevron-left text-[10px]"></i> 前のスライド
                                                         </button>
 
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-sm font-black text-white font-mono bg-indigo-950 px-4 py-1 rounded-xl border border-indigo-700/60 flex items-center gap-1.5">
-                                                                <i className="fa-solid fa-file-powerpoint text-indigo-400 text-xs"></i>
-                                                                <span>スライド {participantSlidePage}</span>
-                                                                <span className="text-indigo-400 font-normal">/</span>
-                                                                <span className="text-indigo-300">{slidePageEnd > 0 ? `${slidePageEnd} ページ (公開中)` : '全ページ'}</span>
-                                                            </span>
+                                                        {/* ページ番号ピル */}
+                                                        <div className="flex items-center gap-1.5">
+                                                            {(() => {
+                                                                const maxP = slidePageEnd > 0 ? slidePageEnd : Math.max(5, participantSlidePage + 2);
+                                                                const pills = [];
+                                                                for (let p = slidePageStart; p <= maxP; p++) {
+                                                                    pills.push(
+                                                                        <button
+                                                                            key={`pc-pill-${p}`}
+                                                                            onClick={() => setParticipantSlidePage(p)}
+                                                                            className={`px-3 py-1 rounded-xl text-xs font-bold font-mono transition ${participantSlidePage === p ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                                                                            {p} ページ
+                                                                        </button>
+                                                                    );
+                                                                }
+                                                                return pills;
+                                                            })()}
                                                         </div>
 
                                                         <button
