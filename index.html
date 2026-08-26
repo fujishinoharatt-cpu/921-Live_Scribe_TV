@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.22.0)</title>
+    <title>研修ワークナビ AI (v1.23.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -15,6 +15,13 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- MQTT WebSocket for 100% Reliable Realtime Sync -->
     <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
+    <!-- PDF.js for Guarranteed Slide Page Range Control -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    </script>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -66,7 +73,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.22.0";
+        const APP_VERSION = "v1.23.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -137,9 +144,174 @@
             return url;
         };
 
+        const getPdfExportUrl = (rawUrl) => {
+            if (!rawUrl || !rawUrl.trim()) return '';
+            const url = rawUrl.trim();
+            // Google Slides: https://docs.google.com/presentation/d/{ID}/export/pdf
+            const gslideMatch = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
+            if (gslideMatch && gslideMatch[1]) {
+                return `https://docs.google.com/presentation/d/${gslideMatch[1]}/export/pdf`;
+            }
+            // Google Drive File
+            const gdriveMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (gdriveMatch && gdriveMatch[1]) {
+                return `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
+            }
+            return url;
+        };
+
         const getEmbedUrlForSlide = (rawUrl) => {
             return convertToEmbedUrl(rawUrl);
         };
+
+        // 📄 先読み完全防止 スライドビューアー（方法A: PDF.js / Canvas 描画方式）
+        function RestrictedSlideViewer({ slideUrl, pageStart = 1, pageEnd = 0, currentPage, onPageChange, showToast }) {
+            const canvasRef = useRef(null);
+            const [pdfDoc, setPdfDoc] = useState(null);
+            const [isLoading, setIsLoading] = useState(false);
+            const [renderError, setRenderError] = useState(false);
+            const [totalPages, setTotalPages] = useState(0);
+
+            // PDFの読み込み
+            useEffect(() => {
+                if (!slideUrl || !window.pdfjsLib) {
+                    setRenderError(true);
+                    return;
+                }
+                const pdfUrl = getPdfExportUrl(slideUrl);
+                if (!pdfUrl) return;
+
+                setIsLoading(true);
+                setRenderError(false);
+
+                const loadingTask = window.pdfjsLib.getDocument({
+                    url: pdfUrl,
+                    withCredentials: false
+                });
+
+                loadingTask.promise.then(pdf => {
+                    setPdfDoc(pdf);
+                    setTotalPages(pdf.numPages);
+                    setIsLoading(false);
+                }).catch(err => {
+                    console.warn("PDF.js direct load fallback to iframe embed:", err);
+                    setRenderError(true);
+                    setIsLoading(false);
+                });
+            }, [slideUrl]);
+
+            // 特定ページのCanvas描画
+            useEffect(() => {
+                if (!pdfDoc || !canvasRef.current || renderError) return;
+
+                // 範囲外のページは描画しない（完全ブロック）
+                if (pageEnd > 0 && currentPage > pageEnd) return;
+
+                const targetPage = Math.max(1, Math.min(currentPage, pdfDoc.numPages));
+                pdfDoc.getPage(targetPage).then(page => {
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    const context = canvas.getContext('2d');
+                    
+                    const containerWidth = canvas.parentElement ? canvas.parentElement.clientWidth : 600;
+                    const unscaledViewport = page.getViewport({ scale: 1.0 });
+                    const scale = Math.max(0.6, Math.min(2.0, (containerWidth - 24) / unscaledViewport.width));
+                    const viewport = page.getViewport({ scale: scale });
+
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    const renderContext = {
+                        canvasContext: context,
+                        viewport: viewport
+                    };
+                    page.render(renderContext);
+                }).catch(err => {
+                    console.error("Page render error:", err);
+                });
+            }, [pdfDoc, currentPage, renderError, pageEnd]);
+
+            const maxAllowedPage = pageEnd > 0 ? pageEnd : (totalPages || 5);
+
+            if (renderError) {
+                // フォールバック: 標準iframe表示
+                return (
+                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
+                        <iframe
+                            src={convertToEmbedUrl(slideUrl, pageStart)}
+                            className="w-full h-full border-0"
+                            allowFullScreen={true}
+                            frameBorder="0"
+                        ></iframe>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex-1 flex flex-col min-h-0 gap-2">
+                    {/* スライド描画領域 */}
+                    <div className="flex-1 w-full h-full rounded-xl overflow-auto bg-slate-950 border border-slate-700 flex items-center justify-center p-2 relative shadow-inner">
+                        {isLoading ? (
+                            <div className="flex flex-col items-center gap-2 text-slate-400 py-12">
+                                <i className="fa-solid fa-circle-notch fa-spin text-3xl text-indigo-400"></i>
+                                <span className="text-xs font-bold">スライド資料を高画質展開中...</span>
+                            </div>
+                        ) : (
+                            <canvas ref={canvasRef} className="max-w-full max-h-full rounded-lg shadow-xl object-contain bg-white" />
+                        )}
+                    </div>
+
+                    {/* 📱 受講者用ページ送りコントローラー */}
+                    <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 flex items-center justify-between shrink-0 shadow-inner">
+                        <button
+                            onClick={() => onPageChange(Math.max(pageStart, currentPage - 1))}
+                            disabled={currentPage <= pageStart}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-40 transition flex items-center gap-1 cursor-pointer">
+                            <i className="fa-solid fa-chevron-left text-[10px]"></i> 前へ
+                        </button>
+
+                        {/* ページ番号ピル */}
+                        <div className="flex items-center gap-1 overflow-x-auto py-0.5 px-1 max-w-[180px] sm:max-w-xs justify-center">
+                            {(() => {
+                                const pills = [];
+                                for (let p = pageStart; p <= maxAllowedPage; p++) {
+                                    pills.push(
+                                        <button
+                                            key={`pill-${p}`}
+                                            onClick={() => onPageChange(p)}
+                                            className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition shrink-0 ${currentPage === p ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                                            {p}P
+                                        </button>
+                                    );
+                                }
+                                return pills;
+                            })()}
+                        </div>
+
+                        <button
+                            onClick={() => {
+                                if (pageEnd > 0 && currentPage >= pageEnd) {
+                                    if (showToast) showToast(`🔒 現在は ${pageEnd} ページまでのみ閲覧可能です`);
+                                    return;
+                                }
+                                onPageChange(currentPage + 1);
+                            }}
+                            disabled={pageEnd > 0 && currentPage >= pageEnd}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${pageEnd > 0 && currentPage >= pageEnd ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50 opacity-80 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow'}`}>
+                            {pageEnd > 0 && currentPage >= pageEnd ? (
+                                <>
+                                    <i className="fa-solid fa-lock text-[10px]"></i> 制限中
+                                </>
+                            ) : (
+                                <>
+                                    次へ <i className="fa-solid fa-chevron-right text-[10px]"></i>
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
 
         const INITIAL_CATEGORIES = [
             { id: 'cat-1', title: '💡 アイデア・提案', color: 'bg-amber-500' },
@@ -2009,14 +2181,14 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             </div>
 
                                             {slideUrl ? (
-                                                <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700">
-                                                    <iframe
-                                                        src={slideUrl}
-                                                        className="w-full h-full border-0"
-                                                        allowFullScreen={true}
-                                                        frameBorder="0"
-                                                    ></iframe>
-                                                </div>
+                                                <RestrictedSlideViewer
+                                                    slideUrl={slideUrl}
+                                                    pageStart={slidePageStart}
+                                                    pageEnd={slidePageEnd}
+                                                    currentPage={participantSlidePage}
+                                                    onPageChange={setParticipantSlidePage}
+                                                    showToast={showToast}
+                                                />
                                             ) : (
                                                 <div className="text-center py-12 border border-dashed border-slate-700 rounded-xl my-auto p-4">
                                                     <i className="fa-solid fa-file-powerpoint text-3xl text-slate-600 mb-2"></i>
@@ -2081,21 +2253,14 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         {participantPcTab === 'slide' ? (
                                             /* スライド埋め込み */
                                             slideUrl ? (
-                                                <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
-                                                    <iframe
-                                                        src={slideUrl}
-                                                        className="w-full h-full border-0"
-                                                        allowFullScreen={true}
-                                                        frameBorder="0"
-                                                    ></iframe>
-                                                    <a 
-                                                        href={slideUrl} 
-                                                        target="_blank" 
-                                                        rel="noreferrer"
-                                                        className="absolute top-3 right-3 bg-slate-900/80 hover:bg-slate-900 text-indigo-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-700 shadow-md backdrop-blur-sm flex items-center gap-1.5 transition">
-                                                        <i className="fa-solid fa-up-right-from-square text-[10px]"></i> 別窓で開く
-                                                    </a>
-                                                </div>
+                                                <RestrictedSlideViewer
+                                                    slideUrl={slideUrl}
+                                                    pageStart={slidePageStart}
+                                                    pageEnd={slidePageEnd}
+                                                    currentPage={participantSlidePage}
+                                                    onPageChange={setParticipantSlidePage}
+                                                    showToast={showToast}
+                                                />
                                             ) : (
                                                 <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-2xl p-6 text-center">
                                                     <i className="fa-solid fa-file-powerpoint text-4xl text-slate-700 mb-3"></i>
