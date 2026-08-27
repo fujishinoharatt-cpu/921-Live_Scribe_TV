@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.34.0)</title>
+    <title>研修ワークナビ AI (v1.35.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.34.0";
+        const APP_VERSION = "v1.35.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -650,6 +650,9 @@
             const screenSentCountRef = useRef(0);
             const screenTickRef = useRef(null);
             const screenTrafficRef = useRef([]);   // 直近の送信量から実効KB/sを出す
+            const screenWorkerRef = useRef(null);     // 非表示タブでも刻めるタイマー用Worker
+            const screenInFlightRef = useRef(false); // 前フレームの送信が終わるまで次を送らない
+            const screenDroppedRef = useRef([]);     // 回線が追いつかず破棄したフレームの時刻
 
             // 画質と更新間隔（配信中でも切り替えできる）
             const [screenQuality, setScreenQuality] = useState(() => {
@@ -953,6 +956,10 @@
                     clearInterval(screenTimerRef.current);
                     screenTimerRef.current = null;
                 }
+                if (screenWorkerRef.current) {
+                    try { screenWorkerRef.current.terminate(); } catch (e) {}
+                    screenWorkerRef.current = null;
+                }
                 if (screenStreamRef.current) {
                     screenStreamRef.current.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
                     screenStreamRef.current = null;
@@ -962,6 +969,8 @@
                 screenThumbRef.current = null;
                 screenSentCountRef.current = 0;
                 screenTrafficRef.current = [];
+                screenInFlightRef.current = false;
+                screenDroppedRef.current = [];
                 screenTickRef.current = null;
                 setIsScreenSharing(false);
                 setScreenStats(null);
@@ -1018,6 +1027,22 @@
                         const needKeyframe = now - screenLastSentAtRef.current > SCREEN_KEYFRAME_MS;
                         if (!changed && !needKeyframe) return;
 
+                        // --- 背圧制御 ---
+                        // 前のフレームがまだ送信中なら、このフレームは捨てる。
+                        // キューに溜めると遅延が雪だるま式に増え、受講者が古い画面を見続けてしまう。
+                        if (screenInFlightRef.current) {
+                            screenDroppedRef.current.push(now);
+                            return;
+                        }
+                        // WebSocketの送信バッファが詰まっている場合も送らない
+                        try {
+                            const sock = mqttClientRef.current && mqttClientRef.current.stream && mqttClientRef.current.stream.socket;
+                            if (sock && typeof sock.bufferedAmount === 'number' && sock.bufferedAmount > 256 * 1024) {
+                                screenDroppedRef.current.push(now);
+                                return;
+                            }
+                        } catch (e) { /* bufferedAmountが取れない環境では素通し */ }
+
                         // --- 本フレームをJPEG化（画質は設定に従う） ---
                         const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current] || SCREEN_QUALITY_PRESETS.medium;
                         const scale = Math.min(1, preset.width / v.videoWidth);
@@ -1037,18 +1062,37 @@
                         screenLastFrameRef.current = dataUrl;
                         screenLastSentAtRef.current = now;
                         screenSentCountRef.current += 1;
-                        broadcastToClients({ type: 'SCREEN_FRAME', dataUrl });
 
-                        // 直近5秒の送信量から実効レートを算出（調整の目安にする）
+                        // 送信完了を待って次のフレームを許可する
+                        screenInFlightRef.current = true;
+                        const done = () => { screenInFlightRef.current = false; };
+                        try {
+                            const topic = `bansho/room/${activeRoomId}`;
+                            const payload = JSON.stringify({ type: 'SCREEN_FRAME', dataUrl, senderId: myClientId });
+                            mqttClientRef.current.publish(topic, payload, { qos: 0 }, done);
+                        } catch (e) {
+                            console.warn('Screen frame publish error:', e);
+                            done();
+                        }
+
+                        // 直近5秒の実測から、実効レートと実際に出ているfpsを算出
                         const traffic = screenTrafficRef.current;
                         traffic.push({ t: now, bytes: dataUrl.length });
                         while (traffic.length && now - traffic[0].t > 5000) traffic.shift();
-                        const kbps = Math.round(traffic.reduce((a, b) => a + b.bytes, 0) / 1024 / 5);
+                        const span = traffic.length > 1 ? (now - traffic[0].t) / 1000 : 1;
+                        const kbps = Math.round(traffic.reduce((a, b) => a + b.bytes, 0) / 1024 / Math.max(1, span));
+                        const fps = Math.round((traffic.length / Math.max(1, span)) * 10) / 10;
 
                         setScreenStats({
                             frames: screenSentCountRef.current,
                             kb: Math.round(dataUrl.length / 1024),
                             kbps,
+                            fps,
+                            dropped: (function () {
+                                const dw = screenDroppedRef.current;
+                                while (dw.length && now - dw[0] > 5000) dw.shift();
+                                return dw.length;
+                            })(),
                             w: canvas.width
                         });
                     };
@@ -1069,14 +1113,36 @@
                 }
             };
 
-            // 配信中に更新間隔を変えたら、タイマーを張り直す
+            // 配信のタイマー。更新間隔の変更にも追従する。
+            //   メインスレッドの setInterval は「タブが非表示」の間 1Hz に制限されるため、
+            //   講師が別ウィンドウで操作を見せている間は 0.3秒/0.5秒 の設定が効かなくなる。
+            //   Web Worker のタイマーはこの制限を受けないので、そちらで刻む。
             useEffect(() => {
                 if (!isScreenSharing || appRole !== 'board') return;
-                if (screenTimerRef.current) clearInterval(screenTimerRef.current);
-                screenTimerRef.current = setInterval(() => {
-                    if (screenTickRef.current) screenTickRef.current();
-                }, screenIntervalMs);
+
+                const runTick = () => { if (screenTickRef.current) screenTickRef.current(); };
+
+                let worker = null;
+                let objectUrl = null;
+                try {
+                    const workerCode = 'let id=null;onmessage=function(e){if(id)clearInterval(id);if(e.data>0){id=setInterval(function(){postMessage(0);},e.data);}};';
+                    objectUrl = URL.createObjectURL(new Blob([workerCode], { type: 'application/javascript' }));
+                    worker = new Worker(objectUrl);
+                    worker.onmessage = runTick;
+                    worker.postMessage(screenIntervalMs);
+                    screenWorkerRef.current = worker;
+                } catch (e) {
+                    // Workerが使えない環境では従来のタイマーにフォールバック（非表示時は1Hz止まり）
+                    console.warn('Screen timer worker unavailable, falling back:', e);
+                    screenTimerRef.current = setInterval(runTick, screenIntervalMs);
+                }
+
                 return () => {
+                    if (worker) {
+                        try { worker.terminate(); } catch (e) {}
+                        screenWorkerRef.current = null;
+                    }
+                    if (objectUrl) URL.revokeObjectURL(objectUrl);
                     if (screenTimerRef.current) {
                         clearInterval(screenTimerRef.current);
                         screenTimerRef.current = null;
@@ -2620,7 +2686,10 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 <span className="truncate">画面を配信中</span>
                                 {screenStats && (
                                     <span className="text-[10px] text-rose-300/90 font-mono bg-rose-900/60 border border-rose-700/50 px-1.5 py-0.5 rounded shrink-0">
-                                        {screenStats.w}px / {screenStats.kb}KB / <b className="text-white">{screenStats.kbps}KB/s</b>
+                                        {screenStats.w}px · {screenStats.kb}KB/枚 · 実測 <b className="text-white">{screenStats.fps}fps</b> · {screenStats.kbps}KB/s
+                                        {screenStats.dropped > 0 && (
+                                            <span className="text-amber-300"> · 破棄 {screenStats.dropped}</span>
+                                        )}
                                     </span>
                                 )}
                             </div>
