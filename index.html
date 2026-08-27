@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.33.0)</title>
+    <title>研修ワークナビ AI (v1.34.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.33.0";
+        const APP_VERSION = "v1.34.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -115,6 +115,22 @@
             const index = Math.abs(hash) % COLOR_PALETTE.length;
             return COLOR_PALETTE[index].id;
         };
+
+        // 🖥️ 画面配信の画質プリセット
+        //   実測: 1024px/q0.5 で約97KB。面積比で 800px≒52KB / 640px≒32KB。
+        //   解像度を落とすほど、同じ通信量でより短い間隔（滑らかさ）に回せる。
+        const SCREEN_QUALITY_PRESETS = {
+            low:    { width: 640,  quality: 0.40, label: '低', note: '約30KB' },
+            medium: { width: 800,  quality: 0.45, label: '中', note: '約50KB' },
+            high:   { width: 1024, quality: 0.55, label: '高', note: '約100KB' }
+        };
+
+        const SCREEN_INTERVAL_OPTIONS = [
+            { ms: 300,  label: '0.3秒' },
+            { ms: 500,  label: '0.5秒' },
+            { ms: 1000, label: '1秒' },
+            { ms: 2000, label: '2秒' }
+        ];
 
         // 推測困難なルームIDを生成（公開MQTTブローカー経由での資料流出を防ぐ）
         const generateSecureRoomId = () => {
@@ -632,6 +648,28 @@
             const screenThumbRef = useRef(null);       // 差分検知用の縮小ピクセル
             const screenLastSentAtRef = useRef(0);
             const screenSentCountRef = useRef(0);
+            const screenTickRef = useRef(null);
+            const screenTrafficRef = useRef([]);   // 直近の送信量から実効KB/sを出す
+
+            // 画質と更新間隔（配信中でも切り替えできる）
+            const [screenQuality, setScreenQuality] = useState(() => {
+                return localStorage.getItem('bansho_screen_quality') || 'medium';
+            });
+            const [screenIntervalMs, setScreenIntervalMs] = useState(() => {
+                return parseInt(localStorage.getItem('bansho_screen_interval') || '500', 10);
+            });
+            const screenQualityRef = useRef(screenQuality);
+            const screenIntervalRef = useRef(screenIntervalMs);
+
+            useEffect(() => {
+                screenQualityRef.current = screenQuality;
+                localStorage.setItem('bansho_screen_quality', screenQuality);
+            }, [screenQuality]);
+
+            useEffect(() => {
+                screenIntervalRef.current = screenIntervalMs;
+                localStorage.setItem('bansho_screen_interval', String(screenIntervalMs));
+            }, [screenIntervalMs]);
 
             const [showLinkModal, setShowLinkModal] = useState(false);
             const [linkInputUrl, setLinkInputUrl] = useState('');
@@ -923,6 +961,8 @@
                 screenLastFrameRef.current = null;
                 screenThumbRef.current = null;
                 screenSentCountRef.current = 0;
+                screenTrafficRef.current = [];
+                screenTickRef.current = null;
                 setIsScreenSharing(false);
                 setScreenStats(null);
                 broadcastToClients({ type: 'SCREEN_STOP' });
@@ -978,15 +1018,15 @@
                         const needKeyframe = now - screenLastSentAtRef.current > SCREEN_KEYFRAME_MS;
                         if (!changed && !needKeyframe) return;
 
-                        // --- 本フレームをJPEG化 ---
-                        const targetW = 1024;
-                        const scale = Math.min(1, targetW / v.videoWidth);
+                        // --- 本フレームをJPEG化（画質は設定に従う） ---
+                        const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current] || SCREEN_QUALITY_PRESETS.medium;
+                        const scale = Math.min(1, preset.width / v.videoWidth);
                         canvas.width = Math.round(v.videoWidth * scale);
                         canvas.height = Math.round(v.videoHeight * scale);
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
 
-                        let quality = 0.5;
+                        let quality = preset.quality;
                         let dataUrl = canvas.toDataURL('image/jpeg', quality);
                         while (dataUrl.length > SCREEN_MAX_PAYLOAD && quality > 0.25) {
                             quality -= 0.1;
@@ -998,10 +1038,23 @@
                         screenLastSentAtRef.current = now;
                         screenSentCountRef.current += 1;
                         broadcastToClients({ type: 'SCREEN_FRAME', dataUrl });
-                        setScreenStats({ frames: screenSentCountRef.current, kb: Math.round(dataUrl.length / 1024) });
+
+                        // 直近5秒の送信量から実効レートを算出（調整の目安にする）
+                        const traffic = screenTrafficRef.current;
+                        traffic.push({ t: now, bytes: dataUrl.length });
+                        while (traffic.length && now - traffic[0].t > 5000) traffic.shift();
+                        const kbps = Math.round(traffic.reduce((a, b) => a + b.bytes, 0) / 1024 / 5);
+
+                        setScreenStats({
+                            frames: screenSentCountRef.current,
+                            kb: Math.round(dataUrl.length / 1024),
+                            kbps,
+                            w: canvas.width
+                        });
                     };
 
-                    screenTimerRef.current = setInterval(tick, 1000);
+                    // 実際のタイマーは下のuseEffectが張る（配信中の間隔変更に追従させるため）
+                    screenTickRef.current = tick;
                     setIsScreenSharing(true);
                     broadcastToClients({ type: 'SCREEN_START' });
                     showToast('🖥️ 画面配信を開始しました（受講者の「画面」タブに表示されます）');
@@ -1015,6 +1068,21 @@
                     stopScreenShare(true);
                 }
             };
+
+            // 配信中に更新間隔を変えたら、タイマーを張り直す
+            useEffect(() => {
+                if (!isScreenSharing || appRole !== 'board') return;
+                if (screenTimerRef.current) clearInterval(screenTimerRef.current);
+                screenTimerRef.current = setInterval(() => {
+                    if (screenTickRef.current) screenTickRef.current();
+                }, screenIntervalMs);
+                return () => {
+                    if (screenTimerRef.current) {
+                        clearInterval(screenTimerRef.current);
+                        screenTimerRef.current = null;
+                    }
+                };
+            }, [isScreenSharing, screenIntervalMs, appRole]);
 
             // 受講者へリンクを配る（埋め込まず、各自のブラウザで開いてもらう）
             const handleShareLink = (rawUrl, rawLabel) => {
@@ -2546,21 +2614,52 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
 
                     {/* 🖥️ 画面配信中インジケーター（講師のみ） */}
                     {appRole === 'board' && isScreenSharing && (
-                        <div className="bg-rose-950/95 border-b border-rose-700/60 px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 shadow-md">
-                            <div className="flex items-center gap-2 text-[11px] font-bold text-rose-200">
-                                <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
-                                <span>画面を配信中 — 受講者の「画面」タブに表示されています</span>
+                        <div className="bg-rose-950/95 border-b border-rose-700/60 px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 shadow-md flex-wrap">
+                            <div className="flex items-center gap-2 text-[11px] font-bold text-rose-200 min-w-0">
+                                <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse shrink-0"></span>
+                                <span className="truncate">画面を配信中</span>
                                 {screenStats && (
-                                    <span className="text-[10px] text-rose-400/80 font-mono">
-                                        {screenStats.frames}枚送信 / 直近 {screenStats.kb}KB
+                                    <span className="text-[10px] text-rose-300/90 font-mono bg-rose-900/60 border border-rose-700/50 px-1.5 py-0.5 rounded shrink-0">
+                                        {screenStats.w}px / {screenStats.kb}KB / <b className="text-white">{screenStats.kbps}KB/s</b>
                                     </span>
                                 )}
                             </div>
-                            <button
-                                onClick={() => stopScreenShare()}
-                                className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition active:scale-95 shrink-0">
-                                配信を停止
-                            </button>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                                {/* 画質 */}
+                                <div className="flex items-center gap-0.5 bg-rose-900/50 border border-rose-700/50 rounded-lg px-1.5 py-0.5">
+                                    <span className="text-[10px] text-rose-300/80 font-medium mr-0.5">画質</span>
+                                    {Object.keys(SCREEN_QUALITY_PRESETS).map(key => (
+                                        <button
+                                            key={key}
+                                            onClick={() => setScreenQuality(key)}
+                                            title={`${SCREEN_QUALITY_PRESETS[key].width}px（1枚 ${SCREEN_QUALITY_PRESETS[key].note}）`}
+                                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${screenQuality === key ? 'bg-white text-rose-800' : 'text-rose-200 hover:bg-rose-800'}`}>
+                                            {SCREEN_QUALITY_PRESETS[key].label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* 更新間隔 */}
+                                <div className="flex items-center gap-0.5 bg-rose-900/50 border border-rose-700/50 rounded-lg px-1.5 py-0.5">
+                                    <span className="text-[10px] text-rose-300/80 font-medium mr-0.5">更新</span>
+                                    {SCREEN_INTERVAL_OPTIONS.map(opt => (
+                                        <button
+                                            key={opt.ms}
+                                            onClick={() => setScreenIntervalMs(opt.ms)}
+                                            title={`${opt.label}ごとに更新`}
+                                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${screenIntervalMs === opt.ms ? 'bg-white text-rose-800' : 'text-rose-200 hover:bg-rose-800'}`}>
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <button
+                                    onClick={() => stopScreenShare()}
+                                    className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition active:scale-95">
+                                    配信を停止
+                                </button>
+                            </div>
                         </div>
                     )}
 
