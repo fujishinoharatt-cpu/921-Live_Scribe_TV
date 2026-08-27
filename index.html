@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.24.0)</title>
+    <title>研修ワークナビ AI (v1.25.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -73,7 +73,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.24.0";
+        const APP_VERSION = "v1.25.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -282,12 +282,20 @@
                     })
                     .catch(err => {
                         if (cancelled) return;
-                        console.error('❌ Restricted slide PDF load error:', err);
+                        console.error('❌ PDF load error:', err);
+                        console.error('❌ PDF URL:', pdfUrl);
+
                         setRenderError(true);
                         setIsLoading(false);
-                        setErrorMessage(
-                            'スライド資料の読み込みに失敗しました。Googleスライドの共有設定（リンクを知っている全員が閲覧可）をご確認ください。'
-                        );
+
+                        let message = 'PDFの読み込みに失敗しました。';
+                        if (err && err.message) {
+                            message += '\n\nエラー: ' + err.message;
+                        }
+                        if (slideUrl && slideUrl.includes('docs.google.com/presentation')) {
+                            message += '\n\nGoogleスライドの共有設定を確認してください。\n「リンクを知っている全員」が閲覧可能になっている必要があります。';
+                        }
+                        setErrorMessage(message);
                     });
 
                 return () => {
@@ -378,7 +386,9 @@
                             <div className="flex flex-col items-center justify-center gap-3 text-center p-6 text-slate-300">
                                 <i className="fa-solid fa-lock text-4xl text-amber-400"></i>
                                 <div className="font-bold text-sm">スライド資料を安全に表示できません</div>
-                                <div className="text-xs text-slate-400 max-w-md">{errorMessage}</div>
+                                <div className="text-xs text-slate-400 max-w-md whitespace-pre-line text-left bg-slate-900/80 p-3 rounded-xl border border-slate-800 font-mono">
+                                    {errorMessage}
+                                </div>
                                 <div className="text-[10px] text-slate-500">公開範囲を保護するため、Googleスライドの直接埋め込みは行っていません</div>
                             </div>
                         ) : isLoading ? (
@@ -682,19 +692,32 @@
             const handleSaveSlideUrl = (url, startP = 1, endP = 0) => {
                 const sNum = Math.max(1, parseInt(startP, 10) || 1);
                 const eNum = Math.max(0, parseInt(endP, 10) || 0);
-                const converted = convertToEmbedUrl(url, sNum);
-                setSlideUrl(converted);
+
+                // URLは変換せず「元のURL」を保存する
+                const originalUrl = (url || '').trim();
+
+                setSlideUrl(originalUrl);
                 setSlidePageStart(sNum);
                 setSlidePageEnd(eNum);
                 setShowSlideModal(false);
+
+                // 受講者へも元URLを送信
                 broadcastToClients({ 
                     type: 'SYNC_SLIDE_URL', 
-                    slideUrl: converted,
+                    slideUrl: originalUrl,
                     pageStart: sNum,
                     pageEnd: eNum
                 });
-                const rangeText = eNum > 0 ? ` (公開範囲: ${sNum}〜${eNum}P)` : (sNum > 1 ? ` (${sNum}P〜)` : '');
-                showToast(converted ? `📄 研修スライドを設定しました${rangeText}（全員に同期）` : '📄 スライドの登録を解除しました');
+
+                const rangeText = eNum > 0
+                    ? `（公開範囲: ${sNum}〜${eNum}P）`
+                    : '（全ページ公開）';
+
+                showToast(
+                    originalUrl
+                        ? `📄 研修スライドを設定しました${rangeText}`
+                        : '📄 スライドの登録を解除しました'
+                );
             };
 
             useEffect(() => { timerSecondsRef.current = timerSeconds; }, [timerSeconds]);
@@ -2735,7 +2758,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     <div className="flex-1 w-full h-full p-2 bg-slate-900 flex items-center justify-center">
                         {slideUrl ? (
                             <iframe
-                                src={slideUrl}
+                                src={convertToEmbedUrl(slideUrl)}
                                 className="w-full h-full rounded-xl border border-slate-800 shadow-2xl bg-white"
                                 allowFullScreen={true}
                                 frameBorder="0"
