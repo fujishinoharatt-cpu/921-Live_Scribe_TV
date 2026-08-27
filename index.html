@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.37.0)</title>
+    <title>研修ワークナビ AI (v1.38.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.37.0";
+        const APP_VERSION = "v1.38.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -153,9 +153,10 @@
         //   実測: 1024px/q0.5 で約97KB。面積比で 800px≒52KB / 640px≒32KB。
         //   解像度を落とすほど、同じ通信量でより短い間隔（滑らかさ）に回せる。
         const SCREEN_QUALITY_PRESETS = {
-            low:    { width: 640,  quality: 0.40, label: '低', note: '約30KB' },
-            medium: { width: 800,  quality: 0.45, label: '中', note: '約50KB' },
-            high:   { width: 1024, quality: 0.55, label: '高', note: '約100KB' }
+            tiny:   { width: 480,  quality: 0.32, label: '最小', note: '最も軽い' },
+            low:    { width: 640,  quality: 0.35, label: '低',   note: '軽い' },
+            medium: { width: 800,  quality: 0.45, label: '中',   note: '標準' },
+            high:   { width: 1024, quality: 0.55, label: '高',   note: '重い' }
         };
 
         const SCREEN_INTERVAL_OPTIONS = [
@@ -688,6 +689,10 @@
             const screenDroppedRef = useRef([]);     // 回線が追いつかず破棄したフレームの時刻
             const screenTickRef2 = useRef([]);       // tickが実際に回った時刻（タイマーが効いているかの確認用）
             const screenNoChangeRef = useRef([]);    // 画面に変化が無くて送らなかった時刻
+            // 送信済みだがまだ送り切れていないバイト数。
+            // これを上限で抑えることで「キューに溜まって遅延が伸びる」のを防ぐ。
+            // mqtt.jsの内部構造に依存せず、publishの完了通知だけで成立する。
+            const screenOutstandingRef = useRef(0);
 
             // 画質と更新間隔（配信中でも切り替えできる）
             const [screenQuality, setScreenQuality] = useState(() => {
@@ -985,6 +990,11 @@
             // ==========================================================
             const SCREEN_MAX_PAYLOAD = 420 * 1024;   // 1フレームの上限（ブローカーの1MB制限への安全域）
             const SCREEN_KEYFRAME_MS = 8000;         // 変化が無くても定期的に送り直す間隔
+            // 同時に送信中のフレームは1枚まで。
+            //   バイト数で上限を設けると、回線が細い環境では上限分の吐き出しに数秒かかり
+            //   受講者が数秒前の画面を見続けることになる。1枚に絞ると遅延は
+            //   「1フレームの送信時間」で頭打ちになり、常に最新の画面が届く。
+            //   その分fpsは回線の実力どおりに自動で下がる（滑らかさより鮮度を優先）。
 
             const stopScreenShare = (silent) => {
                 if (screenTimerRef.current) {
@@ -1008,6 +1018,7 @@
                 screenDroppedRef.current = [];
                 screenTickRef2.current = [];
                 screenNoChangeRef.current = [];
+                screenOutstandingRef.current = 0;
                 screenTickRef.current = null;
                 setIsScreenSharing(false);
                 setScreenStats(null);
@@ -1086,18 +1097,11 @@
                             screenDroppedRef.current.push(now);
                             return;
                         }
-                        // ② 送信バッファの滞留を直接見る。
-                        //    publishの完了コールバックはブラウザのタスク制限を受けて
-                        //    遅れることがあるため、判断材料にはbufferedAmountを使う。
-                        try {
-                            const st = mqttClientRef.current && mqttClientRef.current.stream;
-                            const sock = st && (st.socket || st._socket || st);
-                            const buffered = sock && typeof sock.bufferedAmount === 'number' ? sock.bufferedAmount : 0;
-                            if (buffered > 192 * 1024) {
-                                screenDroppedRef.current.push(now);
-                                return;
-                            }
-                        } catch (e) { /* 取得できない環境では素通し */ }
+                        // ② 前のフレームがまだ送り切れていなければ、今回は送らない（鮮度優先）
+                        if (screenOutstandingRef.current > 0) {
+                            screenDroppedRef.current.push(now);
+                            return;
+                        }
 
                         // --- 本フレームを画像化（画質は設定に従う。WebPが使えればWebP） ---
                         const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current] || SCREEN_QUALITY_PRESETS.medium;
@@ -1120,8 +1124,25 @@
                                 screenSentCountRef.current += 1;
 
                                 const payload = packScreenFrame(bytes, blob.type || SCREEN_IMAGE_TYPE, null);
-                                mqttClientRef.current.publish(`bansho/room/${activeRoomId}/screen`, payload, { qos: 0 });
-                                done(); // 次フレームの判断はbufferedAmountに任せる
+
+                                // 滞留量に計上し、送り切れたら差し引く
+                                screenOutstandingRef.current += payload.length;
+                                let settled = false;
+                                const settle = () => {
+                                    if (settled) return;
+                                    settled = true;
+                                    screenOutstandingRef.current = Math.max(0, screenOutstandingRef.current - payload.length);
+                                };
+                                // 完了通知が来ない環境でも詰まったままにならないよう保険をかける
+                                setTimeout(settle, 5000);
+
+                                mqttClientRef.current.publish(
+                                    `bansho/room/${activeRoomId}/screen`,
+                                    payload,
+                                    { qos: 0 },
+                                    settle
+                                );
+                                done(); // エンコードの排他はここで解除。送信可否は滞留量で判断する
 
                                 // 直近5秒の実測から、実効レートと実際に出ているfpsを算出
                                 const traffic = screenTrafficRef.current;
@@ -1147,6 +1168,7 @@
                                     tickHz,
                                     noChange: nw2.length,
                                     dropped: dw.length,
+                                    queuedKB: Math.round(screenOutstandingRef.current / 1024),
                                     w: frameW,
                                     fmt: (blob.type || SCREEN_IMAGE_TYPE) === 'image/webp' ? 'WebP' : 'JPEG'
                                 });
@@ -2782,6 +2804,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         )}
                                         {screenStats.dropped > 0 && (
                                             <span className="text-amber-300"> · 破棄 {screenStats.dropped}</span>
+                                        )}
+                                        {screenStats.queuedKB > 0 && (
+                                            <span className="text-rose-300"> · 滞留 {screenStats.queuedKB}KB</span>
                                         )}
                                     </span>
                                 )}
