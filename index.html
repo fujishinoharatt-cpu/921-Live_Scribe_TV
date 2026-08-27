@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.29.0)</title>
+    <title>研修ワークナビ AI (v1.30.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.29.0";
+        const APP_VERSION = "v1.30.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -601,13 +601,14 @@
 
             // 📄 スライド資料（Googleスライド / PDF）State & 公開ページ範囲
             const [slideUrl, setSlideUrl] = useState(() => {
-                return localStorage.getItem('bansho_slide_url') || '';
+                // 受講者は講師からの同期で受け取るため、保存値は読まない
+                return isParticipantOnly ? '' : (localStorage.getItem('bansho_slide_url') || '');
             });
             const [slidePageStart, setSlidePageStart] = useState(() => {
-                return parseInt(localStorage.getItem('bansho_slide_page_start') || '1', 10);
+                return isParticipantOnly ? 1 : parseInt(localStorage.getItem('bansho_slide_page_start') || '1', 10);
             });
             const [slidePageEnd, setSlidePageEnd] = useState(() => {
-                return parseInt(localStorage.getItem('bansho_slide_page_end') || '0', 10); // 0 = 制限なし
+                return isParticipantOnly ? 0 : parseInt(localStorage.getItem('bansho_slide_page_end') || '0', 10); // 0 = 制限なし
             });
             const [showSlideModal, setShowSlideModal] = useState(false);
             const [slideInputUrl, setSlideInputUrl] = useState('');
@@ -623,6 +624,15 @@
             // 答えのページを研修の途中でその場で開放できるようにするため。
             const [allSlidePages, setAllSlidePages] = useState([]);
 
+            // 講師が「投影」に使うソース: 'deck'（PDF画像） / 'url'（Googleスライド等の埋め込み）
+            // 受講者へ配信されるのは常にデッキ（方式A）だけで、この設定の影響を受けない
+            const [projectionSource, setProjectionSource] = useState(() => {
+                return localStorage.getItem('bansho_projection_source') || 'deck';
+            });
+            useEffect(() => {
+                if (!isParticipantOnly) localStorage.setItem('bansho_projection_source', projectionSource);
+            }, [projectionSource]);
+
             const slideUrlRef = useRef(slideUrl);
             const slidePageStartRef = useRef(slidePageStart);
             const slidePageEndRef = useRef(slidePageEnd);
@@ -637,17 +647,17 @@
 
             useEffect(() => {
                 slideUrlRef.current = slideUrl;
-                localStorage.setItem('bansho_slide_url', slideUrl);
+                if (!isParticipantOnly) localStorage.setItem('bansho_slide_url', slideUrl);
             }, [slideUrl]);
 
             useEffect(() => {
                 slidePageStartRef.current = slidePageStart;
-                localStorage.setItem('bansho_slide_page_start', slidePageStart);
+                if (!isParticipantOnly) localStorage.setItem('bansho_slide_page_start', slidePageStart);
             }, [slidePageStart]);
 
             useEffect(() => {
                 slidePageEndRef.current = slidePageEnd;
-                localStorage.setItem('bansho_slide_page_end', slidePageEnd);
+                if (!isParticipantOnly) localStorage.setItem('bansho_slide_page_end', slidePageEnd);
             }, [slidePageEnd]);
 
             // ⏱️ 研修用タイマー & 🔒 投稿受付ロックの State
@@ -740,11 +750,9 @@
                     setSlideInputPageEnd(last);
                     deckDbPut({ pages: all, info }).catch(() => {});
 
-                    // 配信方式は排他。デッキ方式では講師側もURLを保持しない
-                    // （解除したときに古いURLが受講者へ復活するのを防ぐ）
-                    setSlideUrl('');
-                    slideUrlRef.current = '';
+                    // 受講者へ渡すのは常にデッキだけ。講師の投影用URLは残したまま共有しない
                     broadcastToClients({ type: 'SYNC_SLIDE_URL', slideUrl: '', pageStart: first, pageEnd: last });
+                    setProjectionSource('deck');
 
                     setSlideDeckProgress({ done: 0, total: published.length, label: '受講者へ配信中...' });
                     await broadcastSlideDeck(published, info);
@@ -846,7 +854,16 @@
                 slideDeckInfoRef.current = null;
                 deckDbClear().catch(() => {});
                 broadcastToClients({ type: 'SLIDE_DECK_CLEAR' });
-                showToast('📄 スライド配信を解除しました');
+
+                // デッキが無くなったので、URLが登録されていれば従来通りそれを受講者へ共有する
+                broadcastToClients({
+                    type: 'SYNC_SLIDE_URL',
+                    slideUrl: slideUrlRef.current || '',
+                    pageStart: slidePageStartRef.current,
+                    pageEnd: slidePageEndRef.current
+                });
+                setProjectionSource('url');
+                showToast('📄 受講者へのPDF配信を解除しました');
             };
 
             const handleSaveSlideUrl = (url, startP = 1, endP = 0) => {
@@ -856,24 +873,29 @@
                 // URLは変換せず「元のURL」を保存する
                 const originalUrl = (url || '').trim();
 
+                const hasDeckNow = allSlidePagesRef.current.length > 0;
+
                 setSlideUrl(originalUrl);
-                setSlidePageStart(sNum);
-                setSlidePageEnd(eNum);
+                slideUrlRef.current = originalUrl;
                 setShowSlideModal(false);
 
-                // URL方式とデッキ方式は排他。URLを保存した時点で画像配信は解除する
-                if (slidePagesRef.current.length > 0) {
-                    setSlidePages([]);
-                    setSlideDeckInfo(null);
-                    slidePagesRef.current = [];
-                    slideDeckInfoRef.current = null;
-                    deckDbClear().catch(() => {});
-                    broadcastToClients({ type: 'SLIDE_DECK_CLEAR' });
+                if (hasDeckNow) {
+                    // 受講者へはPDF配信を続ける。URLは講師の投影専用なので送らないし、
+                    // 公開ページ範囲もデッキ側が持っているので触らない。
+                    if (originalUrl) setProjectionSource('url');
+                    showToast(
+                        originalUrl
+                            ? '📽️ 講師の投影用URLを設定しました（受講者へはPDF配信のまま）'
+                            : '📽️ 講師の投影用URLを解除しました'
+                    );
+                    return;
                 }
 
-                // 受講者へも元URLを送信
-                broadcastToClients({ 
-                    type: 'SYNC_SLIDE_URL', 
+                // デッキが無い場合は従来通り、URLと公開範囲をそのまま受講者へ共有する
+                setSlidePageStart(sNum);
+                setSlidePageEnd(eNum);
+                broadcastToClients({
+                    type: 'SYNC_SLIDE_URL',
                     slideUrl: originalUrl,
                     pageStart: sNum,
                     pageEnd: eNum
@@ -2238,7 +2260,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         <button
                                             onClick={handleToggleLock}
                                             title={isSubmissionsLocked ? "クリックして投稿受付を再開" : "クリックして受講者の投稿を一時停止（解説モード）"}
-                                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95 shadow-sm cursor-pointer ${isSubmissionsLocked ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse' : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-600/30'}`}>
+                                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95 shadow-sm cursor-pointer ${isSubmissionsLocked ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-600/30 animate-pulse'}`}>
                                             <i className={`fa-solid ${isSubmissionsLocked ? 'fa-lock' : 'fa-lock-open'}`}></i>
                                             <span className="hidden sm:inline">{isSubmissionsLocked ? '受付停止中' : '受付中'}</span>
                                         </button>
@@ -2970,6 +2992,25 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             )}
                         </div>
                         <div className="flex items-center gap-2">
+                            {/* 📽️ 講師の投影ソース切替（受講者への配信内容は変わらない） */}
+                            {allSlidePages.length > 0 && slideUrl && (
+                                <div className="flex items-center gap-1 bg-slate-950 border border-slate-700 rounded-lg px-1.5 py-1">
+                                    <span className="text-[10px] text-slate-400 font-medium">投影</span>
+                                    <button
+                                        onClick={() => setProjectionSource('deck')}
+                                        title="PDF画像を投影する（受講者と同じ見え方）"
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectionSource === 'deck' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                                        PDF画像
+                                    </button>
+                                    <button
+                                        onClick={() => setProjectionSource('url')}
+                                        title="Googleスライドをそのまま投影する（アニメーション等が動く）"
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectionSource === 'url' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                                        Googleスライド
+                                    </button>
+                                </div>
+                            )}
+
                             {/* 🔓 答えのページをその場で開放するコントロール */}
                             {allSlidePages.length > 0 && (
                                 <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1">
@@ -3010,7 +3051,15 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         </div>
                     </div>
                     <div className="flex-1 w-full h-full p-2 bg-slate-900 flex items-center justify-center">
-                        {allSlidePages.length > 0 ? (
+                        {(slideUrl && (projectionSource === 'url' || allSlidePages.length === 0)) ? (
+                            /* 方式B: Googleスライド等をそのまま投影（講師の手元だけ・受講者には渡らない） */
+                            <iframe
+                                src={convertToEmbedUrl(slideUrl)}
+                                className="w-full h-full rounded-xl border border-slate-800 shadow-2xl bg-white"
+                                allowFullScreen={true}
+                                frameBorder="0"
+                            ></iframe>
+                        ) : allSlidePages.length > 0 ? (
                             <div className="w-full h-full flex">
                                 {/* 講師の投影は全ページ。受講者に届いているのは公開範囲だけ */}
                                 <RestrictedSlideViewer
@@ -3028,13 +3077,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     showToast={showToast}
                                 />
                             </div>
-                        ) : slideUrl ? (
-                            <iframe
-                                src={convertToEmbedUrl(slideUrl)}
-                                className="w-full h-full rounded-xl border border-slate-800 shadow-2xl bg-white"
-                                allowFullScreen={true}
-                                frameBorder="0"
-                            ></iframe>
                         ) : (
                             <div className="text-center text-slate-400">
                                 <i className="fa-solid fa-file-powerpoint text-4xl mb-3 text-slate-600"></i>
@@ -3598,6 +3640,19 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 </div>
 
                                 <div className="space-y-4">
+                                    {/* 資料の考え方 */}
+                                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-[10px] text-indigo-900 leading-relaxed">
+                                        <p className="font-bold text-[11px] mb-1 flex items-center gap-1.5">
+                                            <i className="fa-solid fa-circle-info text-indigo-600"></i>
+                                            講師と受講者で別の資料を使えます
+                                        </p>
+                                        <p>
+                                            <b>受講者へ配信されるのは、常に方式A（PDF画像）だけ</b>です。
+                                            方式BのURLは<b>講師の投影専用</b>で、受講者には渡りません。
+                                            両方を設定すると、投影画面で「PDF画像 / Googleスライド」を切り替えられます。
+                                        </p>
+                                    </div>
+
                                     {/* ① 受講者に見せるページ範囲 */}
                                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
                                         <div className="flex items-center justify-between">
@@ -3677,7 +3732,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-200 space-y-2">
                                         <div className="flex items-center gap-1.5">
                                             <span className="bg-emerald-600 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">2</span>
-                                            <span className="text-xs font-bold text-emerald-900">方式A: PDFを配信（制限が確実に効く・推奨）</span>
+                                            <span className="text-xs font-bold text-emerald-900">方式A: 受講者へPDF画像を配信（制限が確実に効く）</span>
                                         </div>
                                         <p className="text-[10px] text-emerald-800 leading-relaxed">
                                             Googleスライド / Googleドキュメントは <b>ファイル → ダウンロード → PDF</b> で書き出してから選んでください。
@@ -3741,12 +3796,24 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
                                         <div className="flex items-center gap-1.5">
                                             <span className="bg-slate-400 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">3</span>
-                                            <span className="text-xs font-bold text-slate-700">方式B: URLをそのまま共有（全ページ閲覧可）</span>
+                                            <span className="text-xs font-bold text-slate-700">
+                                                方式B: {allSlidePages.length > 0 ? '講師の投影用URL（受講者には渡りません）' : 'URLをそのまま共有（全ページ閲覧可）'}
+                                            </span>
                                         </div>
-                                        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed">
-                                            <i className="fa-solid fa-triangle-exclamation mr-1"></i>
-                                            この方式では<b>ページ制限を強制できません</b>。埋め込みは別サイト（Google）の画面のため操作を止められず、URL自体も受講者に渡ります。範囲表示はあくまで「案内」です。制限が必要なら方式Aを使ってください。
-                                        </p>
+                                        {allSlidePages.length > 0 ? (
+                                            <p className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2 leading-relaxed">
+                                                <i className="fa-solid fa-shield-halved mr-1"></i>
+                                                方式Aで配信中のため、ここに入れたURLは<b>講師の投影にだけ</b>使われます。
+                                                Googleスライドをそのまま投影できるので、アニメーションや動画もそのまま動きます。
+                                                <b>受講者にはURLも範囲外ページも届きません。</b>
+                                            </p>
+                                        ) : (
+                                            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed">
+                                                <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+                                                方式AのPDFが未設定のため、このURLは<b>受講者にもそのまま渡ります</b>（＝ページ制限は効きません）。
+                                                制限が必要なら、先に方式AでPDFを読み込んでください。
+                                            </p>
+                                        )}
                                         <input
                                             type="url"
                                             value={slideInputUrl}
@@ -3770,7 +3837,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                 onClick={() => handleSaveSlideUrl(slideInputUrl, slideInputPageStart, slideInputPageEnd)}
                                                 className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow transition flex items-center justify-center gap-1.5 cursor-pointer">
                                                 <i className="fa-solid fa-check"></i>
-                                                URLを保存して共有
+                                                {allSlidePages.length > 0 ? '投影用URLを保存' : 'URLを保存して共有'}
                                             </button>
                                         </div>
 
@@ -3779,7 +3846,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                 onClick={() => handleSaveSlideUrl('', 1, 0)}
                                                 className="text-[11px] text-rose-500 hover:text-rose-700 py-1 transition flex items-center justify-center gap-1 cursor-pointer">
                                                 <i className="fa-solid fa-trash-can text-[10px]"></i>
-                                                スライドの登録を解除
+                                                {allSlidePages.length > 0 ? '投影用URLを解除' : 'スライドの登録を解除'}
                                             </button>
                                         )}
                                     </div>
