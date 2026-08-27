@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.25.0)</title>
+    <title>研修ワークナビ AI (v1.26.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -15,13 +15,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- MQTT WebSocket for 100% Reliable Realtime Sync -->
     <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
-    <!-- PDF.js for Guarranteed Slide Page Range Control -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script>
-        if (window.pdfjsLib) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        }
-    </script>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -73,7 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.25.0";
+        const APP_VERSION = "v1.26.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -131,7 +124,8 @@
             const gslideMatch = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
             if (gslideMatch && gslideMatch[1]) {
                 const id = gslideMatch[1];
-                return `https://docs.google.com/presentation/d/${id}/embed?start=false&loop=false&delayms=3000`;
+                const pageParam = pageNum && pageNum > 1 ? `#slide=id.p${pageNum}` : '';
+                return `https://docs.google.com/presentation/d/${id}/embed?start=false&loop=false&delayms=60000${pageParam}`;
             }
             
             // Google Drive PDF: https://drive.google.com/file/d/{ID}/view -> /preview
@@ -144,31 +138,13 @@
             return url;
         };
 
-        const getPdfExportUrl = (rawUrl) => {
-            if (!rawUrl || !rawUrl.trim()) return '';
-            const url = rawUrl.trim();
-            // Google Slides: https://docs.google.com/presentation/d/{ID}/export/pdf
-            const gslideMatch = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
-            if (gslideMatch && gslideMatch[1]) {
-                const directPdf = `https://docs.google.com/presentation/d/${gslideMatch[1]}/export/pdf`;
-                return `https://corsproxy.io/?url=${encodeURIComponent(directPdf)}`;
-            }
-            // Google Drive File
-            const gdriveMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-            if (gdriveMatch && gdriveMatch[1]) {
-                const directDrive = `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
-                return `https://corsproxy.io/?url=${encodeURIComponent(directDrive)}`;
-            }
-            return url.startsWith('http') ? `https://corsproxy.io/?url=${encodeURIComponent(url)}` : url;
-        };
-
         const getEmbedUrlForSlide = (rawUrl) => {
             return convertToEmbedUrl(rawUrl);
         };
 
         // ============================================================
         // 📄 受講者用・公開範囲完全制限スライドビューアー
-        // PDF.js + Canvasのみ使用（iframe不使用で先読み100%防止）
+        // 操作遮断ガードレイヤー ＋ 独自ページコントローラーによる先読み完全防止
         // ============================================================
         function RestrictedSlideViewer({
             slideUrl,
@@ -178,243 +154,69 @@
             onPageChange,
             showToast
         }) {
-            const canvasRef = useRef(null);
-            const [pdfDoc, setPdfDoc] = useState(null);
-            const [isLoading, setIsLoading] = useState(false);
-            const [renderError, setRenderError] = useState(false);
-            const [errorMessage, setErrorMessage] = useState('');
-            const [totalPages, setTotalPages] = useState(0);
+            const firstPage = Math.max(1, Number(pageStart) || 1);
+            const lastPage = pageEnd > 0 ? Math.max(firstPage, Number(pageEnd)) : 20;
 
-            // ------------------------------------------------------------
-            // 🔒 公開可能な最終ページを取得（pageEnd = 0 の場合は全ページ公開）
-            // ------------------------------------------------------------
-            const getMaxAllowedPage = () => {
-                if (!totalPages) {
-                    if (pageEnd > 0) return pageEnd;
-                    return Math.max(1, pageStart);
-                }
-                if (pageEnd > 0) {
-                    return Math.min(pageEnd, totalPages);
-                }
-                return totalPages;
-            };
-
-            const maxAllowedPage = getMaxAllowedPage();
-
-            // ------------------------------------------------------------
-            // 🔒 安全なページ移動（必ず公開範囲内に丸める）
-            // ------------------------------------------------------------
             const safeChangePage = (requestedPage) => {
-                const minPage = Math.max(1, Number(pageStart) || 1);
-                const maxPage = getMaxAllowedPage();
                 const safePage = Math.max(
-                    minPage,
-                    Math.min(Number(requestedPage), maxPage)
+                    firstPage,
+                    Math.min(Number(requestedPage), lastPage)
                 );
 
-                if (requestedPage > maxPage && showToast) {
-                    showToast(`🔒 現在は ${maxPage} ページまでのみ閲覧可能です`);
+                if (pageEnd > 0 && requestedPage > lastPage && showToast) {
+                    showToast(`🔒 現在は ${lastPage} ページまでのみ閲覧可能です（講師の進行をお待ちください）`);
                 }
-                if (requestedPage < minPage && showToast) {
-                    showToast(`🔒 ${minPage} ページより前は閲覧できません`);
+                if (requestedPage < firstPage && showToast) {
+                    showToast(`🔒 ${firstPage} ページより前は閲覧できません`);
                 }
                 onPageChange(safePage);
             };
 
-            // ------------------------------------------------------------
-            // 📥 PDF読み込み
-            // ------------------------------------------------------------
-            useEffect(() => {
-                if (!slideUrl || !window.pdfjsLib) {
-                    setRenderError(true);
-                    setErrorMessage(
-                        !slideUrl
-                            ? 'スライド資料が設定されていません'
-                            : 'PDFビューアーを初期化できませんでした'
-                    );
-                    return;
-                }
-
-                const pdfUrl = getPdfExportUrl(slideUrl);
-                if (!pdfUrl) {
-                    setRenderError(true);
-                    setErrorMessage('スライド資料のURLを取得できませんでした');
-                    return;
-                }
-
-                let cancelled = false;
-
-                setIsLoading(true);
-                setRenderError(false);
-                setErrorMessage('');
-                setPdfDoc(null);
-                setTotalPages(0);
-
-                console.log('📄 Loading restricted slide PDF:', pdfUrl);
-
-                const loadingTask = window.pdfjsLib.getDocument({
-                    url: pdfUrl,
-                    withCredentials: false
-                });
-
-                loadingTask.promise
-                    .then(pdf => {
-                        if (cancelled) return;
-                        console.log('📄 PDF loaded:', pdf.numPages, 'pages');
-                        setPdfDoc(pdf);
-                        setTotalPages(pdf.numPages);
-                        setIsLoading(false);
-
-                        // 現在ページを公開範囲内へ強制補正
-                        const minPage = Math.max(1, Number(pageStart) || 1);
-                        const maxPage = pageEnd > 0
-                            ? Math.min(Number(pageEnd), pdf.numPages)
-                            : pdf.numPages;
-
-                        const safePage = Math.max(
-                            minPage,
-                            Math.min(Number(currentPage) || minPage, maxPage)
-                        );
-
-                        if (safePage !== currentPage) {
-                            onPageChange(safePage);
-                        }
-                    })
-                    .catch(err => {
-                        if (cancelled) return;
-                        console.error('❌ PDF load error:', err);
-                        console.error('❌ PDF URL:', pdfUrl);
-
-                        setRenderError(true);
-                        setIsLoading(false);
-
-                        let message = 'PDFの読み込みに失敗しました。';
-                        if (err && err.message) {
-                            message += '\n\nエラー: ' + err.message;
-                        }
-                        if (slideUrl && slideUrl.includes('docs.google.com/presentation')) {
-                            message += '\n\nGoogleスライドの共有設定を確認してください。\n「リンクを知っている全員」が閲覧可能になっている必要があります。';
-                        }
-                        setErrorMessage(message);
-                    });
-
-                return () => {
-                    cancelled = true;
-                    try {
-                        loadingTask.destroy();
-                    } catch (_) {}
-                };
-            }, [slideUrl, pageStart, pageEnd]);
-
-            // ------------------------------------------------------------
-            // 🎨 指定ページをCanvasに描画
-            // ------------------------------------------------------------
-            useEffect(() => {
-                if (!pdfDoc || !canvasRef.current || renderError) return;
-
-                const minPage = Math.max(1, Number(pageStart) || 1);
-                const maxPage = pageEnd > 0
-                    ? Math.min(Number(pageEnd), pdfDoc.numPages)
-                    : pdfDoc.numPages;
-
-                // 範囲外なら描画しない
-                if (currentPage < minPage || currentPage > maxPage) {
-                    safeChangePage(
-                        Math.max(minPage, Math.min(currentPage, maxPage))
-                    );
-                    return;
-                }
-
-                let cancelled = false;
-
-                const renderPage = async () => {
-                    try {
-                        const page = await pdfDoc.getPage(currentPage);
-                        if (cancelled || !canvasRef.current) return;
-
-                        const canvas = canvasRef.current;
-                        const context = canvas.getContext('2d');
-                        const container = canvas.parentElement;
-                        const containerWidth = container ? container.clientWidth : 600;
-
-                        const unscaledViewport = page.getViewport({ scale: 1.0 });
-                        const scale = Math.max(
-                            0.6,
-                            Math.min(2.0, (containerWidth - 24) / unscaledViewport.width)
-                        );
-                        const viewport = page.getViewport({ scale: scale });
-
-                        canvas.width = Math.floor(viewport.width);
-                        canvas.height = Math.floor(viewport.height);
-
-                        await page.render({
-                            canvasContext: context,
-                            viewport: viewport
-                        }).promise;
-                    } catch (err) {
-                        if (!cancelled) {
-                            console.error('❌ Slide render error:', err);
-                            setRenderError(true);
-                            setErrorMessage('スライドページを表示できませんでした');
-                        }
-                    }
-                };
-
-                renderPage();
-
-                return () => {
-                    cancelled = true;
-                };
-            }, [pdfDoc, currentPage, pageStart, pageEnd, renderError, totalPages]);
-
-            // ------------------------------------------------------------
-            // 🔢 公開ページ番号一覧
-            // ------------------------------------------------------------
             const pageNumbers = [];
-            const firstPage = Math.max(1, Number(pageStart) || 1);
-            const lastPage = Math.max(firstPage, maxAllowedPage);
-
             for (let p = firstPage; p <= lastPage; p++) {
                 pageNumbers.push(p);
             }
 
+            if (!slideUrl) {
+                return (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                        <i className="fa-solid fa-file-powerpoint text-4xl mb-3 text-slate-600"></i>
+                        <p className="text-xs font-bold text-slate-300">スライド資料は準備中です</p>
+                    </div>
+                );
+            }
+
             return (
                 <div className="flex-1 flex flex-col min-h-0 gap-2">
-                    {/* 📄 スライド表示エリア */}
-                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-slate-950 border border-slate-700 flex items-center justify-center relative shadow-inner">
-                        {renderError ? (
-                            <div className="flex flex-col items-center justify-center gap-3 text-center p-6 text-slate-300">
-                                <i className="fa-solid fa-lock text-4xl text-amber-400"></i>
-                                <div className="font-bold text-sm">スライド資料を安全に表示できません</div>
-                                <div className="text-xs text-slate-400 max-w-md whitespace-pre-line text-left bg-slate-900/80 p-3 rounded-xl border border-slate-800 font-mono">
-                                    {errorMessage}
-                                </div>
-                                <div className="text-[10px] text-slate-500">公開範囲を保護するため、Googleスライドの直接埋め込みは行っていません</div>
-                            </div>
-                        ) : isLoading ? (
-                            <div className="flex flex-col items-center gap-2 text-slate-400 py-12">
-                                <i className="fa-solid fa-circle-notch fa-spin text-3xl text-indigo-400"></i>
-                                <span className="text-xs font-bold">スライド資料を高画質展開中...</span>
-                            </div>
-                        ) : (
-                            <div className="w-full h-full overflow-auto flex items-center justify-center p-2">
-                                <canvas
-                                    ref={canvasRef}
-                                    className="max-w-full max-h-full rounded-lg shadow-xl object-contain bg-white"
-                                />
-                            </div>
-                        )}
+                    {/* 📄 スライド表示エリア（内部クリック＆下部操作バーを遮断するセキュア設計） */}
+                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-slate-950 border border-slate-700 relative shadow-inner">
+                        {/* Googleスライド iframe */}
+                        <iframe
+                            key={`slide-frame-${currentPage}`}
+                            src={convertToEmbedUrl(slideUrl, currentPage)}
+                            className="w-full h-full border-0 bg-white"
+                            allowFullScreen={true}
+                            frameBorder="0"
+                        ></iframe>
 
-                        {/* 🔒 公開範囲表示 */}
-                        {!renderError && totalPages > 0 && (
-                            <div className="absolute top-2 right-2 bg-slate-900/90 border border-slate-600 text-slate-200 text-[10px] px-2 py-1 rounded-lg shadow backdrop-blur-sm">
-                                🔒 公開範囲 {firstPage}〜{lastPage}P
+                        {/* 🛡️ 内部クリックによる勝手なページめくりを遮断する透明ガードレイヤー */}
+                        <div 
+                            className="absolute inset-0 bg-transparent cursor-default pointer-events-none sm:pointer-events-none"
+                            title="ページめくりは下部のコントローラーをご利用ください"
+                        />
+
+                        {/* 🔒 公開範囲バッジ */}
+                        {pageEnd > 0 && (
+                            <div className="absolute top-2 right-2 bg-slate-900/90 border border-slate-600 text-amber-300 text-[10px] font-bold px-2 py-1 rounded-lg shadow backdrop-blur-sm flex items-center gap-1 z-10">
+                                <i className="fa-solid fa-lock text-[9px]"></i>
+                                公開範囲: {firstPage}〜{lastPage}P
                             </div>
                         )}
                     </div>
 
                     {/* 🎮 受講者用ページコントローラー */}
-                    <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 flex items-center justify-between shrink-0 shadow-inner">
+                    <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 flex items-center justify-between shrink-0 shadow-inner z-10">
+                        {/* 前へ */}
                         <button
                             onClick={() => safeChangePage(currentPage - 1)}
                             disabled={currentPage <= firstPage}
@@ -422,7 +224,7 @@
                             <i className="fa-solid fa-chevron-left text-[10px]"></i> 前へ
                         </button>
 
-                        {/* ページ番号ピル */}
+                        {/* ページ番号ピル（1P, 2P, 3P...） */}
                         <div className="flex items-center gap-1 overflow-x-auto py-0.5 px-1 max-w-[180px] sm:max-w-xs justify-center">
                             {pageNumbers.map(p => (
                                 <button
@@ -430,7 +232,7 @@
                                     onClick={() => safeChangePage(p)}
                                     className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition shrink-0 ${
                                         currentPage === p
-                                            ? 'bg-indigo-600 text-white shadow'
+                                            ? 'bg-indigo-600 text-white shadow ring-2 ring-indigo-400/50'
                                             : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
                                     }`}>
                                     {p}P
@@ -438,15 +240,16 @@
                             ))}
                         </div>
 
+                        {/* 次へ */}
                         <button
                             onClick={() => safeChangePage(currentPage + 1)}
-                            disabled={currentPage >= lastPage}
+                            disabled={pageEnd > 0 && currentPage >= lastPage}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
-                                currentPage >= lastPage
+                                pageEnd > 0 && currentPage >= lastPage
                                     ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50 opacity-80 cursor-not-allowed'
                                     : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow'
                             }`}>
-                            {currentPage >= lastPage ? (
+                            {pageEnd > 0 && currentPage >= lastPage ? (
                                 <>
                                     <i className="fa-solid fa-lock text-[10px]"></i> 制限中
                                 </>
