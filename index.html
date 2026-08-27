@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.38.0)</title>
+    <title>研修ワークナビ AI (v1.39.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.38.0";
+        const APP_VERSION = "v1.39.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -3919,7 +3919,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
     {/* QR Modal */}
                     {showQrModal && (
                         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-center">
+                            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-center max-h-[90dvh] overflow-y-auto">
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                                         <i className="fa-solid fa-qrcode text-emerald-600"></i>
@@ -3981,7 +3981,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* Bulk Input Modal */}
                     {showBulkModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
+                            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 max-h-[90dvh] overflow-y-auto">
                                 <h3 className="text-base font-bold text-slate-800 mb-2 flex items-center gap-2">
                                     <i className="fa-solid fa-list-check text-indigo-600"></i>
                                     テキスト一括入力（改行区切り）
@@ -4045,7 +4045,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* ✨ 新しい板書を開始モーダル */}
                     {showNewBoardModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
+                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150 max-h-[90dvh] overflow-y-auto">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                                         <i className="fa-solid fa-folder-plus text-amber-500"></i>
@@ -4108,7 +4108,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* 💾 板書のスナップショット保存確認モーダル（付箋0件でも確実に保存可能） */}
                     {showSaveSnapshotModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
+                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150 max-h-[90dvh] overflow-y-auto">
                                 <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                                     <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                                         <i className="fa-solid fa-floppy-disk text-indigo-600"></i>
@@ -4280,7 +4280,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* 🔗 リンク共有モーダル */}
                     {showLinkModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
+                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150 max-h-[90dvh] overflow-y-auto">
                                 <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                                     <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                                         <i className="fa-solid fa-link text-emerald-600"></i>
@@ -4376,8 +4376,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* 📄 研修スライド（Googleスライド / PDF）設定モーダル */}
                     {showSlideModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
-                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                            {/* 画面より高くならないよう、見出しは固定して中身だけスクロールさせる */}
+                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150 max-h-[90dvh] flex flex-col">
+                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 shrink-0">
                                     <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                                         <i className="fa-solid fa-file-powerpoint text-indigo-600"></i>
                                         研修スライド資料の設定
@@ -4387,7 +4388,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     </button>
                                 </div>
 
-                                <div className="space-y-4">
+                                <div className="space-y-4 flex-1 min-h-0 overflow-y-auto -mr-2 pr-2">
                                     {/* 資料の考え方 */}
                                     <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-[10px] text-indigo-900 leading-relaxed">
                                         <p className="font-bold text-[11px] mb-1 flex items-center gap-1.5">
@@ -4612,7 +4613,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* ⚙️ Gemini API 設定モーダル */}
                     {showConfigModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
+                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150 max-h-[90dvh] overflow-y-auto">
                                 <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                                     <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                                         <i className="fa-solid fa-wand-magic-sparkles text-indigo-600"></i>
