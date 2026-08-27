@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.31.0)</title>
+    <title>研修ワークナビ AI (v1.33.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.31.0";
+        const APP_VERSION = "v1.33.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -610,6 +610,33 @@
             const [slidePageEnd, setSlidePageEnd] = useState(() => {
                 return isParticipantOnly ? 0 : parseInt(localStorage.getItem('bansho_slide_page_end') || '0', 10); // 0 = 制限なし
             });
+            // 🔗 共有リンク（受講者に「別タブで開いてもらう」ためのURL）
+            //    gemini.google.com のように X-Frame-Options で埋め込みを拒否するサイトは
+            //    iframeでは表示できないため、リンクとして配る。
+            const [sharedLink, setSharedLink] = useState(() => {
+                if (isParticipantOnly) return null;
+                try {
+                    return JSON.parse(localStorage.getItem('bansho_shared_link') || 'null');
+                } catch (e) {
+                    return null;
+                }
+            });
+            // 🖥️ 画面配信（低fpsの連続画像をMQTTで配る。WebRTCと違いNAT越えの問題が出ない）
+            const [isScreenSharing, setIsScreenSharing] = useState(false);
+            const [screenFrame, setScreenFrame] = useState(null);   // 受講者が表示する最新フレーム
+            const [screenStats, setScreenStats] = useState(null);   // 講師向けの送信状況
+            const screenStreamRef = useRef(null);
+            const screenVideoRef = useRef(null);
+            const screenTimerRef = useRef(null);
+            const screenLastFrameRef = useRef(null);   // 途中参加者への再送用
+            const screenThumbRef = useRef(null);       // 差分検知用の縮小ピクセル
+            const screenLastSentAtRef = useRef(0);
+            const screenSentCountRef = useRef(0);
+
+            const [showLinkModal, setShowLinkModal] = useState(false);
+            const [linkInputUrl, setLinkInputUrl] = useState('');
+            const [linkInputLabel, setLinkInputLabel] = useState('');
+
             const [showSlideModal, setShowSlideModal] = useState(false);
             const [slideInputUrl, setSlideInputUrl] = useState('');
             const [slideInputPageStart, setSlideInputPageStart] = useState(1);
@@ -673,6 +700,14 @@
             const sessionThemeTitleRef = useRef(sessionThemeTitle);
             const cardsRef = useRef(cards);
             const categoriesRef = useRef(categories);
+            const sharedLinkRef = useRef(null);
+
+            useEffect(() => {
+                sharedLinkRef.current = sharedLink;
+                if (!isParticipantOnly) {
+                    localStorage.setItem('bansho_shared_link', JSON.stringify(sharedLink));
+                }
+            }, [sharedLink]);
             const timerSecondsRef = useRef(timerSeconds);
             const isTimerRunningRef = useRef(isTimerRunning);
             const timerTotalRef = useRef(timerTotal);
@@ -865,6 +900,144 @@
                 });
                 setProjectionSource('url');
                 showToast('📄 受講者へのPDF配信を解除しました');
+            };
+
+            // ==========================================================
+            // 🖥️ 画面配信
+            //   getDisplayMediaで取得した画面を一定間隔でJPEG化し、MQTTで配信する。
+            //   画面に変化が無いフレームは送らないため、静止中は通信が発生しない。
+            // ==========================================================
+            const SCREEN_MAX_PAYLOAD = 420 * 1024;   // 1フレームの上限（ブローカーの1MB制限への安全域）
+            const SCREEN_KEYFRAME_MS = 8000;         // 変化が無くても定期的に送り直す間隔
+
+            const stopScreenShare = (silent) => {
+                if (screenTimerRef.current) {
+                    clearInterval(screenTimerRef.current);
+                    screenTimerRef.current = null;
+                }
+                if (screenStreamRef.current) {
+                    screenStreamRef.current.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
+                    screenStreamRef.current = null;
+                }
+                screenVideoRef.current = null;
+                screenLastFrameRef.current = null;
+                screenThumbRef.current = null;
+                screenSentCountRef.current = 0;
+                setIsScreenSharing(false);
+                setScreenStats(null);
+                broadcastToClients({ type: 'SCREEN_STOP' });
+                if (!silent) showToast('🖥️ 画面配信を終了しました');
+            };
+
+            const startScreenShare = async () => {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                    showToast('⚠️ このブラウザは画面配信に対応していません');
+                    return;
+                }
+                try {
+                    const stream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { frameRate: 5 },
+                        audio: false
+                    });
+                    screenStreamRef.current = stream;
+
+                    const video = document.createElement('video');
+                    video.srcObject = stream;
+                    video.muted = true;
+                    video.playsInline = true;
+                    await video.play();
+                    screenVideoRef.current = video;
+
+                    // ブラウザの「共有を停止」バーから止められた場合
+                    stream.getVideoTracks()[0].addEventListener('ended', () => stopScreenShare(true));
+
+                    const canvas = document.createElement('canvas');
+                    const thumb = document.createElement('canvas');
+                    thumb.width = 32; thumb.height = 18;
+
+                    const tick = () => {
+                        const v = screenVideoRef.current;
+                        if (!v || !v.videoWidth) return;
+
+                        // --- 差分検知（32x18に縮めて比較。静止中は送らない） ---
+                        const tctx = thumb.getContext('2d');
+                        tctx.drawImage(v, 0, 0, thumb.width, thumb.height);
+                        const cur = tctx.getImageData(0, 0, thumb.width, thumb.height).data;
+                        const prev = screenThumbRef.current;
+                        let changed = true;
+                        if (prev) {
+                            let diff = 0;
+                            for (let i = 0; i < cur.length; i += 4) {
+                                diff += Math.abs(cur[i] - prev[i]) + Math.abs(cur[i + 1] - prev[i + 1]) + Math.abs(cur[i + 2] - prev[i + 2]);
+                            }
+                            changed = (diff / (cur.length / 4)) > 6; // 平均色差のしきい値
+                        }
+                        screenThumbRef.current = new Uint8ClampedArray(cur);
+
+                        const now = Date.now();
+                        const needKeyframe = now - screenLastSentAtRef.current > SCREEN_KEYFRAME_MS;
+                        if (!changed && !needKeyframe) return;
+
+                        // --- 本フレームをJPEG化 ---
+                        const targetW = 1024;
+                        const scale = Math.min(1, targetW / v.videoWidth);
+                        canvas.width = Math.round(v.videoWidth * scale);
+                        canvas.height = Math.round(v.videoHeight * scale);
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+
+                        let quality = 0.5;
+                        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+                        while (dataUrl.length > SCREEN_MAX_PAYLOAD && quality > 0.25) {
+                            quality -= 0.1;
+                            dataUrl = canvas.toDataURL('image/jpeg', quality);
+                        }
+                        if (dataUrl.length > SCREEN_MAX_PAYLOAD) return; // 送れないほど大きい場合は諦める
+
+                        screenLastFrameRef.current = dataUrl;
+                        screenLastSentAtRef.current = now;
+                        screenSentCountRef.current += 1;
+                        broadcastToClients({ type: 'SCREEN_FRAME', dataUrl });
+                        setScreenStats({ frames: screenSentCountRef.current, kb: Math.round(dataUrl.length / 1024) });
+                    };
+
+                    screenTimerRef.current = setInterval(tick, 1000);
+                    setIsScreenSharing(true);
+                    broadcastToClients({ type: 'SCREEN_START' });
+                    showToast('🖥️ 画面配信を開始しました（受講者の「画面」タブに表示されます）');
+                } catch (e) {
+                    console.warn('Screen share error:', e);
+                    if (e && e.name === 'NotAllowedError') {
+                        showToast('画面配信をキャンセルしました');
+                    } else {
+                        showToast('⚠️ 画面配信を開始できませんでした: ' + (e && e.message ? e.message : e));
+                    }
+                    stopScreenShare(true);
+                }
+            };
+
+            // 受講者へリンクを配る（埋め込まず、各自のブラウザで開いてもらう）
+            const handleShareLink = (rawUrl, rawLabel) => {
+                const input = (rawUrl || '').trim();
+                if (!input) {
+                    showToast('⚠️ URLを入力してください');
+                    return;
+                }
+                const url = /^https?:\/\//i.test(input) ? input : 'https://' + input;
+                const next = { url, label: (rawLabel || '').trim() };
+
+                setSharedLink(next);
+                sharedLinkRef.current = next;
+                setShowLinkModal(false);
+                broadcastToClients({ type: 'SYNC_SHARED_LINK', link: next });
+                showToast('🔗 リンクを受講者に配りました');
+            };
+
+            const handleClearSharedLink = () => {
+                setSharedLink(null);
+                sharedLinkRef.current = null;
+                broadcastToClients({ type: 'SYNC_SHARED_LINK', link: null });
+                showToast('🔗 リンクの共有を解除しました');
             };
 
             const handleSaveSlideUrl = (url, startP = 1, endP = 0) => {
@@ -1143,6 +1316,7 @@
                                         targetClientId: data.senderId,
                                         cards: cardsRef.current,
                                         categories: categoriesRef.current,
+                                        sharedLink: sharedLinkRef.current,
                                         themeTitle: sessionThemeTitleRef.current,
                                         timer: {
                                             seconds: timerSecondsRef.current,
@@ -1155,6 +1329,16 @@
                                         pageStart: slidePageStartRef.current,
                                         pageEnd: slidePageEndRef.current
                                     }));
+
+                                    // 配信中なら最新の画面フレームを個別に送る
+                                    if (screenLastFrameRef.current) {
+                                        client.publish(topic, JSON.stringify({
+                                            type: 'SCREEN_FRAME',
+                                            senderId: myClientId,
+                                            targetClientId: data.senderId,
+                                            dataUrl: screenLastFrameRef.current
+                                        }));
+                                    }
 
                                     // 途中参加者にもデッキを個別再送する
                                     if (slidePagesRef.current.length > 0) {
@@ -1177,6 +1361,7 @@
                                 if (data.type === 'SYNC_FULL_STATE' && (!data.targetClientId || data.targetClientId === myClientId)) {
                                     if (data.cards) setCards(data.cards);
                                     if (data.categories) setCategories(data.categories);
+                                    if (data.sharedLink !== undefined) setSharedLink(data.sharedLink);
                                     if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
                                     if (data.timer) {
                                         setTimerSeconds(data.timer.seconds || 0);
@@ -1191,6 +1376,23 @@
                                     }
                                     if (data.pageStart !== undefined) setSlidePageStart(data.pageStart);
                                     if (data.pageEnd !== undefined) setSlidePageEnd(data.pageEnd);
+                                } else if (data.type === 'SCREEN_FRAME') {
+                                    if (data.targetClientId && data.targetClientId !== myClientId) return;
+                                    setScreenFrame(data.dataUrl);
+                                    setIsScreenSharing(true);
+                                } else if (data.type === 'SCREEN_START') {
+                                    setIsScreenSharing(true);
+                                    setParticipantTab('screen');
+                                    showToast('🖥️ 講師の画面配信が始まりました');
+                                } else if (data.type === 'SCREEN_STOP') {
+                                    setIsScreenSharing(false);
+                                    setScreenFrame(null);
+                                    setParticipantTab(prev => prev === 'screen' ? 'post' : prev);
+                                } else if (data.type === 'SYNC_SHARED_LINK') {
+                                    setSharedLink(data.link || null);
+                                    if (data.link) {
+                                        showToast('🔗 講師からリンクが届きました');
+                                    }
                                 } else if (data.type === 'SYNC_CATEGORIES') {
                                     if (data.categories) setCategories(data.categories);
                                 } else if (data.type === 'SYNC_CARDS') {
@@ -2300,6 +2502,30 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         <span className="hidden lg:inline">スライド設定</span>
                                     </button>
 
+                                    {/* 🖥️ 画面配信ボタン */}
+                                    <button
+                                        onClick={() => isScreenSharing ? stopScreenShare() : startScreenShare()}
+                                        title={isScreenSharing ? "画面配信を終了する" : "講師PCの画面を受講者のスマホへ配信する"}
+                                        className={`px-2.5 py-1.5 rounded-xl border text-xs transition flex items-center gap-1.5 font-bold shadow-sm ${isScreenSharing ? 'bg-rose-950 text-rose-300 border-rose-500/60 hover:bg-rose-900' : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'}`}>
+                                        <i className={`fa-solid ${isScreenSharing ? 'fa-circle-stop' : 'fa-desktop'} ${isScreenSharing ? 'text-rose-400' : 'text-sky-400'}`}></i>
+                                        <span className="hidden lg:inline">{isScreenSharing ? '配信停止' : '画面配信'}</span>
+                                        {isScreenSharing && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>}
+                                    </button>
+
+                                    {/* 🔗 リンク共有ボタン（埋め込めないサイトを受講者に開いてもらう） */}
+                                    <button
+                                        onClick={() => {
+                                            setLinkInputUrl(sharedLink ? sharedLink.url : '');
+                                            setLinkInputLabel(sharedLink ? (sharedLink.label || '') : '');
+                                            setShowLinkModal(true);
+                                        }}
+                                        title="受講者にURLを配る（Gemini等、埋め込めないサイト向け）"
+                                        className={`px-2.5 py-1.5 rounded-xl border text-xs transition flex items-center gap-1.5 font-bold shadow-sm ${sharedLink ? 'bg-emerald-950 text-emerald-300 border-emerald-500/60 hover:bg-emerald-900' : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'}`}>
+                                        <i className="fa-solid fa-link text-emerald-400"></i>
+                                        <span className="hidden lg:inline">リンク共有</span>
+                                        {sharedLink && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>}
+                                    </button>
+
                                     {/* ⚙️ メニュー・設定統合ボタン（AI整理・保存・記録・新規・設定を一括集約） */}
                                     <button 
                                         onClick={() => setShowMenuModal(true)}
@@ -2317,6 +2543,58 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             )}
                         </div>
                     </header>
+
+                    {/* 🖥️ 画面配信中インジケーター（講師のみ） */}
+                    {appRole === 'board' && isScreenSharing && (
+                        <div className="bg-rose-950/95 border-b border-rose-700/60 px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 shadow-md">
+                            <div className="flex items-center gap-2 text-[11px] font-bold text-rose-200">
+                                <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
+                                <span>画面を配信中 — 受講者の「画面」タブに表示されています</span>
+                                {screenStats && (
+                                    <span className="text-[10px] text-rose-400/80 font-mono">
+                                        {screenStats.frames}枚送信 / 直近 {screenStats.kb}KB
+                                    </span>
+                                )}
+                            </div>
+                            <button
+                                onClick={() => stopScreenShare()}
+                                className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition active:scale-95 shrink-0">
+                                配信を停止
+                            </button>
+                        </div>
+                    )}
+
+                    {/* 🔗 講師から配られたリンク（受講者は開くだけ、講師は解除できる） */}
+                    {sharedLink && sharedLink.url && (
+                        <div className="bg-emerald-950/95 border-b border-emerald-700/60 px-3 py-2 flex items-center justify-between gap-3 shrink-0 shadow-md">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <i className="fa-solid fa-link text-emerald-400 text-xs shrink-0"></i>
+                                <div className="min-w-0">
+                                    <p className="text-[11px] font-bold text-emerald-200 truncate">
+                                        {sharedLink.label || '講師からのリンク'}
+                                    </p>
+                                    <p className="text-[10px] text-emerald-500/80 font-mono truncate">{sharedLink.url}</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                <a
+                                    href={sharedLink.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow transition active:scale-95 flex items-center gap-1.5">
+                                    <i className="fa-solid fa-up-right-from-square text-[10px]"></i> 開く
+                                </a>
+                                {appRole === 'board' && (
+                                    <button
+                                        onClick={handleClearSharedLink}
+                                        title="リンクの共有を解除"
+                                        className="text-emerald-400/70 hover:text-rose-400 p-1.5 transition">
+                                        <i className="fa-solid fa-xmark text-xs"></i>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {appRole === 'participant' ? (
                         isMobile ? (
@@ -2352,8 +2630,16 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         )}
                                     </div>
 
-                                    {/* タブ切り替えバー（3タブ構成: スライド ➔ 投稿 ➔ 意見） */}
+                                    {/* タブ切り替えバー（配信中は先頭に「画面」タブが増える） */}
                                     <div className="bg-slate-800 p-1 rounded-xl border border-slate-700 flex items-center gap-1 shrink-0 shadow-md">
+                                        {isScreenSharing && (
+                                            <button
+                                                onClick={() => setParticipantTab('screen')}
+                                                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'screen' ? 'bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
+                                                <i className="fa-solid fa-desktop text-rose-300"></i> 画面
+                                                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
+                                            </button>
+                                        )}
                                         <button 
                                             onClick={() => setParticipantTab('slide')}
                                             className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${participantTab === 'slide' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>
@@ -2377,7 +2663,38 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         </button>
                                     </div>
 
-                                    {participantTab === 'post' ? (
+                                    {participantTab === 'screen' ? (
+                                        /* 🖥️ 講師の画面配信 */
+                                        <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 overflow-hidden">
+                                            <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700/80 shrink-0">
+                                                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-desktop text-rose-400"></i>
+                                                    講師の画面
+                                                    <span className="bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] px-1.5 py-0.2 rounded-full font-bold flex items-center gap-1">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span> LIVE
+                                                    </span>
+                                                </h3>
+                                                <span className="text-[10px] text-slate-500">操作の様子が数秒ごとに更新されます</span>
+                                            </div>
+
+                                            <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-950 rounded-xl border border-slate-700 overflow-hidden select-none">
+                                                {screenFrame ? (
+                                                    <img
+                                                        src={screenFrame}
+                                                        alt="講師の画面"
+                                                        draggable={false}
+                                                        onContextMenu={(e) => e.preventDefault()}
+                                                        className="max-w-full max-h-full object-contain pointer-events-none"
+                                                    />
+                                                ) : (
+                                                    <div className="text-center text-slate-400 p-6">
+                                                        <i className="fa-solid fa-spinner fa-spin text-2xl mb-2 text-rose-400"></i>
+                                                        <p className="text-xs font-bold">画面の受信を待っています…</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : participantTab === 'post' ? (
                                         /* 📝 投稿・履歴タブ */
                                         <div className="flex flex-col flex-1 min-h-0 gap-2">
                                             {/* 📜 あなたの投稿履歴 */}
@@ -2642,6 +2959,15 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     {/* パネルヘッダー：タブ切り替え & テーマ/タイマー */}
                                     <div className="bg-slate-950 px-4 py-2 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
                                         <div className="flex items-center gap-1.5">
+                                            {isScreenSharing && (
+                                                <button
+                                                    onClick={() => setParticipantPcTab('screen')}
+                                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${participantPcTab === 'screen' ? 'bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                                                    <i className="fa-solid fa-desktop text-rose-300"></i>
+                                                    <span>講師の画面</span>
+                                                    <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
+                                                </button>
+                                            )}
                                             <button 
                                                 onClick={() => setParticipantPcTab('slide')}
                                                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${participantPcTab === 'slide' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
@@ -2683,7 +3009,24 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
 
                                     {/* パネルコンテンツ */}
                                     <div className="flex-1 min-h-0 p-3 bg-slate-900/60 overflow-hidden flex flex-col">
-                                        {participantPcTab === 'slide' ? (
+                                        {participantPcTab === 'screen' ? (
+                                            <div className="flex-1 min-h-0 flex items-center justify-center bg-slate-950 rounded-2xl border border-slate-700 overflow-hidden select-none">
+                                                {screenFrame ? (
+                                                    <img
+                                                        src={screenFrame}
+                                                        alt="講師の画面"
+                                                        draggable={false}
+                                                        onContextMenu={(e) => e.preventDefault()}
+                                                        className="max-w-full max-h-full object-contain pointer-events-none"
+                                                    />
+                                                ) : (
+                                                    <div className="text-center text-slate-400 p-6">
+                                                        <i className="fa-solid fa-spinner fa-spin text-3xl mb-3 text-rose-400"></i>
+                                                        <p className="text-sm font-bold">画面の受信を待っています…</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : participantPcTab === 'slide' ? (
                                             /* スライド埋め込み */
                                             (slideUrl || slidePages.length > 0 || slideDeckProgress) ? (
                                                 <RestrictedSlideViewer
@@ -3648,6 +3991,102 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         </div>
                     )}
 
+                    {/* 🔗 リンク共有モーダル */}
+                    {showLinkModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
+                                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                        <i className="fa-solid fa-link text-emerald-600"></i>
+                                        受講者にリンクを配る
+                                    </h3>
+                                    <button onClick={() => setShowLinkModal(false)} className="text-slate-400 hover:text-slate-600 text-sm">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-xl p-3 leading-relaxed">
+                                        受講者の画面上部にリンクが表示され、<b>各自のブラウザで開けます</b>。
+                                        Gemini・ChatGPT・Google検索などは、サイト側の設定で画面内への埋め込みが拒否されるため、
+                                        こちらでリンクとして配ってください。
+                                    </p>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1.5">URL</label>
+                                        <input
+                                            type="text"
+                                            value={linkInputUrl}
+                                            onChange={(e) => setLinkInputUrl(e.target.value)}
+                                            placeholder="gemini.google.com"
+                                            autoFocus
+                                            onKeyDown={(e) => { if (e.key === 'Enter') handleShareLink(linkInputUrl, linkInputLabel); }}
+                                            className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                                        />
+                                        <p className="text-[10px] text-slate-400 mt-1">https:// は省略できます</p>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                            表示名 <span className="font-normal text-slate-400">（任意）</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={linkInputLabel}
+                                            onChange={(e) => setLinkInputLabel(e.target.value)}
+                                            placeholder="例: Gemini を開いて試してみましょう"
+                                            onKeyDown={(e) => { if (e.key === 'Enter') handleShareLink(linkInputUrl, linkInputLabel); }}
+                                            className="w-full border border-slate-300 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                                        />
+                                    </div>
+
+                                    {/* 投影して読み取ってもらう用のQR */}
+                                    {sharedLink && sharedLink.url && (
+                                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center space-y-2">
+                                            <p className="text-[11px] font-bold text-slate-700">
+                                                <i className="fa-solid fa-qrcode text-slate-500 mr-1"></i>
+                                                配信中（投影してスマホで読み取れます）
+                                            </p>
+                                            <div className="bg-white p-3 rounded-xl inline-block border border-slate-200">
+                                                <img
+                                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=50&data=${encodeURIComponent(sharedLink.url)}`}
+                                                    alt="共有リンクQR"
+                                                    className="w-40 h-40 block"
+                                                />
+                                            </div>
+                                            <p className="text-[10px] text-slate-500 font-mono break-all">{sharedLink.url}</p>
+                                        </div>
+                                    )}
+
+                                    <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setShowLinkModal(false)}
+                                                className="flex-1 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+                                                キャンセル
+                                            </button>
+                                            <button
+                                                onClick={() => handleShareLink(linkInputUrl, linkInputLabel)}
+                                                className="flex-1 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow transition flex items-center justify-center gap-1.5 cursor-pointer">
+                                                <i className="fa-solid fa-paper-plane"></i>
+                                                受講者に配る
+                                            </button>
+                                        </div>
+
+                                        {sharedLink && (
+                                            <button
+                                                onClick={() => { handleClearSharedLink(); setShowLinkModal(false); }}
+                                                className="text-[11px] text-rose-500 hover:text-rose-700 py-1 transition flex items-center justify-center gap-1 cursor-pointer">
+                                                <i className="fa-solid fa-trash-can text-[10px]"></i>
+                                                共有を解除
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* 📄 研修スライド（Googleスライド / PDF）設定モーダル */}
                     {showSlideModal && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -3846,6 +4285,12 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         />
                                         <p className="text-[10px] text-slate-400">
                                             対応: Googleスライド / Googleドライブ上のPDF / その他のWeb公開資料URL
+                                        </p>
+                                        <p className="text-[10px] text-slate-600 bg-slate-100 border border-slate-200 rounded-lg p-2 leading-relaxed">
+                                            <i className="fa-solid fa-circle-exclamation text-slate-500 mr-1"></i>
+                                            Gemini・ChatGPT・Google検索などは<b>サイト側が埋め込みを拒否</b>するため、ここに入れても
+                                            「接続が拒否されました」と表示されます。こうしたサイトはヘッダーの
+                                            <b>「リンク共有」</b>から配ってください。
                                         </p>
                                     </div>
 
