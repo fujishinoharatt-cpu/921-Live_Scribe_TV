@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.36.0)</title>
+    <title>研修ワークナビ AI (v1.37.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.36.0";
+        const APP_VERSION = "v1.37.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -686,6 +686,8 @@
             const screenWorkerRef = useRef(null);     // 非表示タブでも刻めるタイマー用Worker
             const screenInFlightRef = useRef(false); // 前フレームの送信が終わるまで次を送らない
             const screenDroppedRef = useRef([]);     // 回線が追いつかず破棄したフレームの時刻
+            const screenTickRef2 = useRef([]);       // tickが実際に回った時刻（タイマーが効いているかの確認用）
+            const screenNoChangeRef = useRef([]);    // 画面に変化が無くて送らなかった時刻
 
             // 画質と更新間隔（配信中でも切り替えできる）
             const [screenQuality, setScreenQuality] = useState(() => {
@@ -1004,6 +1006,8 @@
                 screenTrafficRef.current = [];
                 screenInFlightRef.current = false;
                 screenDroppedRef.current = [];
+                screenTickRef2.current = [];
+                screenNoChangeRef.current = [];
                 screenTickRef.current = null;
                 setIsScreenSharing(false);
                 setScreenStats(null);
@@ -1035,30 +1039,46 @@
 
                     const canvas = document.createElement('canvas');
                     const thumb = document.createElement('canvas');
-                    thumb.width = 32; thumb.height = 18;
+                    thumb.width = 64; thumb.height = 36;
 
                     const tick = () => {
+                        const nowTick = Date.now();
+                        // タイマーが設定どおり回っているかを記録（fpsが上がらない原因の切り分け用）
+                        const tw = screenTickRef2.current;
+                        tw.push(nowTick);
+                        while (tw.length && nowTick - tw[0] > 5000) tw.shift();
+
                         const v = screenVideoRef.current;
                         if (!v || !v.videoWidth) return;
 
-                        // --- 差分検知（32x18に縮めて比較。静止中は送らない） ---
+                        // --- 差分検知（縮小画像で比較。静止中は送らない） ---
+                        //   平均だけで見ると「小さい領域だけ変わった」場合に見逃すので、
+                        //   1画素あたりの最大変化量も併せて判定する。
                         const tctx = thumb.getContext('2d');
                         tctx.drawImage(v, 0, 0, thumb.width, thumb.height);
                         const cur = tctx.getImageData(0, 0, thumb.width, thumb.height).data;
                         const prev = screenThumbRef.current;
                         let changed = true;
-                        if (prev) {
-                            let diff = 0;
+                        if (prev && prev.length === cur.length) {
+                            let diff = 0, maxDiff = 0;
                             for (let i = 0; i < cur.length; i += 4) {
-                                diff += Math.abs(cur[i] - prev[i]) + Math.abs(cur[i + 1] - prev[i + 1]) + Math.abs(cur[i + 2] - prev[i + 2]);
+                                const d = Math.abs(cur[i] - prev[i]) + Math.abs(cur[i + 1] - prev[i + 1]) + Math.abs(cur[i + 2] - prev[i + 2]);
+                                diff += d;
+                                if (d > maxDiff) maxDiff = d;
                             }
-                            changed = (diff / (cur.length / 4)) > 6; // 平均色差のしきい値
+                            const mean = diff / (cur.length / 4);
+                            changed = mean > 3 || maxDiff > 40;
                         }
                         screenThumbRef.current = new Uint8ClampedArray(cur);
 
-                        const now = Date.now();
+                        const now = nowTick;
                         const needKeyframe = now - screenLastSentAtRef.current > SCREEN_KEYFRAME_MS;
-                        if (!changed && !needKeyframe) return;
+                        if (!changed && !needKeyframe) {
+                            const nw = screenNoChangeRef.current;
+                            nw.push(now);
+                            while (nw.length && now - nw[0] > 5000) nw.shift();
+                            return;
+                        }
 
                         // --- 背圧制御 ---
                         // ① エンコード中なら重ねて走らせない
@@ -1113,11 +1133,19 @@
                                 const dw = screenDroppedRef.current;
                                 while (dw.length && now - dw[0] > 5000) dw.shift();
 
+                                const tw2 = screenTickRef2.current;
+                                const tickSpan = tw2.length > 1 ? (now - tw2[0]) / 1000 : 1;
+                                const tickHz = Math.round((tw2.length / Math.max(1, tickSpan)) * 10) / 10;
+                                const nw2 = screenNoChangeRef.current;
+                                while (nw2.length && now - nw2[0] > 5000) nw2.shift();
+
                                 setScreenStats({
                                     frames: screenSentCountRef.current,
                                     kb: Math.round(bytes.length / 1024),
                                     kbps,
                                     fps,
+                                    tickHz,
+                                    noChange: nw2.length,
                                     dropped: dw.length,
                                     w: frameW,
                                     fmt: (blob.type || SCREEN_IMAGE_TYPE) === 'image/webp' ? 'WebP' : 'JPEG'
@@ -2747,7 +2775,11 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 <span className="truncate">画面を配信中</span>
                                 {screenStats && (
                                     <span className="text-[10px] text-rose-300/90 font-mono bg-rose-900/60 border border-rose-700/50 px-1.5 py-0.5 rounded shrink-0">
-                                        {screenStats.w}px · {screenStats.fmt} {screenStats.kb}KB/枚 · 設定{screenIntervalMs / 1000}秒 → 実測 <b className="text-white">{screenStats.fps}fps</b> · {screenStats.kbps}KB/s
+                                        {screenStats.w}px · {screenStats.fmt} {screenStats.kb}KB/枚 · 設定{screenIntervalMs / 1000}秒 →
+                                        {' '}tick {screenStats.tickHz}/s · 送信 <b className="text-white">{screenStats.fps}fps</b> · {screenStats.kbps}KB/s
+                                        {screenStats.noChange > 0 && (
+                                            <span className="text-sky-300"> · 変化なし {screenStats.noChange}</span>
+                                        )}
                                         {screenStats.dropped > 0 && (
                                             <span className="text-amber-300"> · 破棄 {screenStats.dropped}</span>
                                         )}
