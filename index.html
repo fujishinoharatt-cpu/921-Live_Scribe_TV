@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.30.0)</title>
+    <title>研修ワークナビ AI (v1.31.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.30.0";
+        const APP_VERSION = "v1.31.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -672,6 +672,7 @@
             const hostConnsRef = useRef([]); // 講師ボード接続クライアント一覧
             const sessionThemeTitleRef = useRef(sessionThemeTitle);
             const cardsRef = useRef(cards);
+            const categoriesRef = useRef(categories);
             const timerSecondsRef = useRef(timerSeconds);
             const isTimerRunningRef = useRef(isTimerRunning);
             const timerTotalRef = useRef(timerTotal);
@@ -1141,6 +1142,7 @@
                                         senderId: myClientId,
                                         targetClientId: data.senderId,
                                         cards: cardsRef.current,
+                                        categories: categoriesRef.current,
                                         themeTitle: sessionThemeTitleRef.current,
                                         timer: {
                                             seconds: timerSecondsRef.current,
@@ -1174,6 +1176,7 @@
                                 // 参加者側でのメッセージ受信処理
                                 if (data.type === 'SYNC_FULL_STATE' && (!data.targetClientId || data.targetClientId === myClientId)) {
                                     if (data.cards) setCards(data.cards);
+                                    if (data.categories) setCategories(data.categories);
                                     if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
                                     if (data.timer) {
                                         setTimerSeconds(data.timer.seconds || 0);
@@ -1188,6 +1191,8 @@
                                     }
                                     if (data.pageStart !== undefined) setSlidePageStart(data.pageStart);
                                     if (data.pageEnd !== undefined) setSlidePageEnd(data.pageEnd);
+                                } else if (data.type === 'SYNC_CATEGORIES') {
+                                    if (data.categories) setCategories(data.categories);
                                 } else if (data.type === 'SYNC_CARDS') {
                                     if (data.cards) setCards(data.cards);
                                     if (data.themeTitle) setSessionThemeTitle(data.themeTitle);
@@ -1327,9 +1332,18 @@
             };
 
             // LocalStorage Auto-Save
+            //   グループ（カテゴリ）は受講者側の板書閲覧にも使うので、並び順や名称の
+            //   変更をそのまま配信する。
             useEffect(() => {
-                localStorage.setItem('bansho_categories', JSON.stringify(categories));
-            }, [categories]);
+                categoriesRef.current = categories;
+                // 受講者は講師から同期を受け取る側なので、講師の保存値を上書きしない
+                if (!isParticipantOnly) {
+                    localStorage.setItem('bansho_categories', JSON.stringify(categories));
+                }
+                if (appRole === 'board') {
+                    broadcastToClients({ type: 'SYNC_CATEGORIES', categories });
+                }
+            }, [categories, appRole]);
 
             useEffect(() => {
                 localStorage.setItem('bansho_cards', JSON.stringify(cards));
@@ -1376,18 +1390,6 @@
                 // 講師ボードへシグナル送信（P2P）
                 sendP2pMessage({ type: 'VOTE_CARD', cardId, delta });
             };
-
-            // LocalStorage Auto-Save
-            useEffect(() => {
-                localStorage.setItem('bansho_categories', JSON.stringify(categories));
-            }, [categories]);
-
-            useEffect(() => {
-                localStorage.setItem('bansho_cards', JSON.stringify(cards));
-                if (appRole === 'board') {
-                    broadcastToClients({ type: 'SYNC_CARDS', cards });
-                }
-            }, [cards, appRole]);
 
             useEffect(() => {
                 localStorage.setItem('bansho_archives', JSON.stringify(archives));
@@ -1864,6 +1866,24 @@
                 setNewCategoryTitle('');
                 setIsAddingCategory(false);
                 showToast(`グループ「${newCat.title}」を作成しました`);
+            };
+
+            // グループの並び順を入れ替える（隣と交換 / 端まで移動）
+            const handleMoveCategory = (catId, direction) => {
+                setCategories(prev => {
+                    const idx = prev.findIndex(c => c.id === catId);
+                    if (idx < 0) return prev;
+                    const next = [...prev];
+                    const [moved] = next.splice(idx, 1);
+
+                    let target;
+                    if (direction === 'first') target = 0;
+                    else if (direction === 'last') target = next.length;
+                    else target = Math.max(0, Math.min(next.length, idx + (direction === 'left' ? -1 : 1)));
+
+                    next.splice(target, 0, moved);
+                    return next;
+                });
             };
 
             const handleDeleteCategory = (catId) => {
@@ -3135,7 +3155,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     {/* Right: Categorized Canvas */}
                     {viewMode === 'kanban' ? (
                         <div className="flex-1 flex overflow-x-auto p-6 space-x-6 bg-slate-100/60 items-start">
-                            {categories.map(cat => {
+                            {categories.map((cat, catIndex) => {
                                 const catCards = cards.filter(c => c.categoryId === cat.id);
                                 const summary = summaries[cat.id];
 
@@ -3153,6 +3173,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             onUpdateTitle={handleUpdateCategoryTitle}
                                             onDelete={handleDeleteCategory}
                                             onSort={handleSortCategoryCards}
+                                            onMove={handleMoveCategory}
+                                            isFirst={catIndex === 0}
+                                            isLast={catIndex === categories.length - 1}
                                         />
 
                                         {/* AI Summary Box */}
@@ -4091,7 +4114,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
             );
         }
 
-        function CategoryHeader({ cat, count, onUpdateTitle, onDelete, onSort }) {
+        function CategoryHeader({ cat, count, onUpdateTitle, onDelete, onSort, onMove, isFirst, isLast }) {
             const [isEditing, setIsEditing] = useState(false);
             const [title, setTitle] = useState(cat.title);
 
@@ -4137,12 +4160,35 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 {count}
                             </span>
                         </div>
-                        <button 
-                            onClick={() => onDelete(cat.id)}
-                            title="グループ削除"
-                            className="text-slate-400 hover:text-rose-500 p-1 text-xs transition shrink-0">
-                            <i className="fa-solid fa-trash-can"></i>
-                        </button>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                            {/* ◀▶ グループの並び替え（長押し不要のワンクリック移動） */}
+                            {onMove && (
+                                <>
+                                    <button
+                                        onClick={() => onMove(cat.id, 'left')}
+                                        disabled={isFirst}
+                                        title="このグループを1つ左へ（Shift+クリックで左端へ）"
+                                        onMouseDown={(e) => { if (e.shiftKey) { e.preventDefault(); onMove(cat.id, 'first'); } }}
+                                        className="text-slate-400 hover:text-indigo-600 hover:bg-slate-200 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400 p-1 rounded text-xs transition">
+                                        <i className="fa-solid fa-chevron-left"></i>
+                                    </button>
+                                    <button
+                                        onClick={() => onMove(cat.id, 'right')}
+                                        disabled={isLast}
+                                        title="このグループを1つ右へ（Shift+クリックで右端へ）"
+                                        onMouseDown={(e) => { if (e.shiftKey) { e.preventDefault(); onMove(cat.id, 'last'); } }}
+                                        className="text-slate-400 hover:text-indigo-600 hover:bg-slate-200 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400 p-1 rounded text-xs transition">
+                                        <i className="fa-solid fa-chevron-right"></i>
+                                    </button>
+                                </>
+                            )}
+                            <button
+                                onClick={() => onDelete(cat.id)}
+                                title="グループ削除"
+                                className="text-slate-400 hover:text-rose-500 p-1 text-xs transition">
+                                <i className="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
                     </div>
 
                     {/* クイック並び替えバー（カードが2枚以上あるとき表示） */}
