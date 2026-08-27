@@ -1,0 +1,148 @@
+{
+  "appName": "bansho-app",
+  "version": "v1.7.0",
+  "exportedAt": "2026/8/26 11:04:26",
+  "archives": [
+    {
+      "id": "arch-1787709830961",
+      "title": "AIはどうやって答えをだしているのか？",
+      "savedAt": "2026/08/26 11:03",
+      "cards": [],
+      "categories": [],
+      "summaries": {},
+      "cardCount": 0,
+      "totalVotes": 0
+    },
+    {
+      "id": "arch-1787650019593",
+      "title": "2026/08/25 18:26 セッション2",
+      "savedAt": "2026/08/25 18:26",
+      "cards": [
+        {
+          "id": "c-1",
+          "text": "スマホから誰でもすぐに意見を投稿できるようにしたい",
+          "color": "sticky-yellow",
+          "categoryId": "cat-1",
+          "votes": 4,
+          "author": "受講者A",
+          "createdAt": "16:10"
+        },
+        {
+          "id": "c-2",
+          "text": "研修中のグループワークでの発言を可視化したい",
+          "color": "sticky-blue",
+          "categoryId": "cat-1",
+          "votes": 2,
+          "author": "受講者B",
+          "createdAt": "16:12"
+        },
+        {
+          "id": "c-3",
+          "text": "意見が多くなりすぎた時に分類に時間がかかる",
+          "color": "sticky-pink",
+          "categoryId": "cat-1",
+          "votes": 5,
+          "author": "受講者C",
+          "createdAt": "16:15"
+        },
+        {
+          "id": "c-4",
+          "text": "AIが要約まで作ってくれるとレポート作成が楽になる",
+          "color": "sticky-green",
+          "categoryId": "cat-1",
+          "votes": 3,
+          "author": "受講者D",
+          "createdAt": "16:18"
+        }
+      ],
+      "categories": [
+        {
+          "id": "cat-1",
+          "title": "💡 アイデア・提案",
+          "color": "bg-amber-500"
+        },
+        {
+          "id": "cat-2",
+          "title": "⚠️ 課題・現状の悩み",
+          "color": "bg-rose-500"
+        },
+        {
+          "id": "cat-3",
+          "title": "🚀 次のアクション",
+          "color": "bg-emerald-500"
+        }
+      ],
+      "summaries": {},
+      "cardCount": 4,
+      "totalVotes": 14
+    },
+    {
+      "id": "arch-1787646517788",
+      "title": "2026/08/25 17:28 セッション",
+      "savedAt": "2026/08/25 17:28",
+      "cards": [
+        {
+          "id": "c-1",
+          "text": "スマホから誰でもすぐに意見を投稿できるようにしたい",
+          "color": "sticky-yellow",
+          "categoryId": null,
+          "votes": 4,
+          "author": "受講者A",
+          "createdAt": "16:10"
+        },
+        {
+          "id": "c-2",
+          "text": "研修中のグループワークでの発言を可視化したい",
+          "color": "sticky-blue",
+          "categoryId": null,
+          "votes": 2,
+          "author": "受講者B",
+          "createdAt": "16:12"
+        },
+        {
+          "id": "c-3",
+          "text": "意見が多くなりすぎた時に分類に時間がかかる",
+          "color": "sticky-pink",
+          "categoryId": null,
+          "votes": 5,
+          "author": "受講者C",
+          "createdAt": "16:15"
+        },
+        {
+          "id": "c-4",
+          "text": "AIが要約まで作ってくれるとレポート作成が楽になる",
+          "color": "sticky-green",
+          "categoryId": null,
+          "votes": 3,
+          "author": "受講者D",
+          "createdAt": "16:18"
+        }
+      ],
+      "categories": [
+        {
+          "id": "cat-1",
+          "title": "💡 アイデア・提案",
+          "color": "bg-amber-500"
+        },
+        {
+          "id": "cat-2",
+          "title": "⚠️ 課題・現状の悩み",
+          "color": "bg-rose-500"
+        },
+        {
+          "id": "cat-3",
+          "title": "🚀 次のアクション",
+          "color": "bg-emerald-500"
+        }
+      ],
+      "summaries": {},
+      "cardCount": 4,
+      "totalVotes": 14
+    }
+  ],
+  "currentBoard": {
+    "cards": [],
+    "categories": [],
+    "summaries": {}
+  }
+}

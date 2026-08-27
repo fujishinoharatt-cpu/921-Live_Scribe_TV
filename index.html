@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.35.0)</title>
+    <title>研修ワークナビ AI (v1.36.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.35.0";
+        const APP_VERSION = "v1.36.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -114,6 +114,39 @@
             }
             const index = Math.abs(hash) % COLOR_PALETTE.length;
             return COLOR_PALETTE[index].id;
+        };
+
+        // WebPでエンコードできるか（JPEGより1〜2割小さい）。不可ならJPEGにフォールバック。
+        const SCREEN_IMAGE_TYPE = (() => {
+            try {
+                const c = document.createElement('canvas');
+                c.width = 2; c.height = 2;
+                return c.toDataURL('image/webp').startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+            } catch (e) {
+                return 'image/jpeg';
+            }
+        })();
+
+        // 画面フレームのバイナリ形式
+        //   [0] 形式 (1=jpeg, 2=webp) / [1] 宛先IDの長さ (0=全員) / [2..] 宛先ID / 残り=画像バイト列
+        //   base64のJSONで送ると約33%膨らむため、生バイトで送る。
+        const packScreenFrame = (bytes, mime, targetClientId) => {
+            const idBytes = targetClientId ? new TextEncoder().encode(targetClientId) : new Uint8Array(0);
+            const out = new Uint8Array(2 + idBytes.length + bytes.length);
+            out[0] = mime === 'image/webp' ? 2 : 1;
+            out[1] = idBytes.length;
+            out.set(idBytes, 2);
+            out.set(bytes, 2 + idBytes.length);
+            return out;
+        };
+
+        const unpackScreenFrame = (buf) => {
+            const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+            if (bytes.length < 2) return null;
+            const mime = bytes[0] === 2 ? 'image/webp' : 'image/jpeg';
+            const idLen = bytes[1];
+            const targetClientId = idLen > 0 ? new TextDecoder().decode(bytes.subarray(2, 2 + idLen)) : '';
+            return { mime, targetClientId, image: bytes.subarray(2 + idLen) };
         };
 
         // 🖥️ 画面配信の画質プリセット
@@ -1028,22 +1061,25 @@
                         if (!changed && !needKeyframe) return;
 
                         // --- 背圧制御 ---
-                        // 前のフレームがまだ送信中なら、このフレームは捨てる。
-                        // キューに溜めると遅延が雪だるま式に増え、受講者が古い画面を見続けてしまう。
+                        // ① エンコード中なら重ねて走らせない
                         if (screenInFlightRef.current) {
                             screenDroppedRef.current.push(now);
                             return;
                         }
-                        // WebSocketの送信バッファが詰まっている場合も送らない
+                        // ② 送信バッファの滞留を直接見る。
+                        //    publishの完了コールバックはブラウザのタスク制限を受けて
+                        //    遅れることがあるため、判断材料にはbufferedAmountを使う。
                         try {
-                            const sock = mqttClientRef.current && mqttClientRef.current.stream && mqttClientRef.current.stream.socket;
-                            if (sock && typeof sock.bufferedAmount === 'number' && sock.bufferedAmount > 256 * 1024) {
+                            const st = mqttClientRef.current && mqttClientRef.current.stream;
+                            const sock = st && (st.socket || st._socket || st);
+                            const buffered = sock && typeof sock.bufferedAmount === 'number' ? sock.bufferedAmount : 0;
+                            if (buffered > 192 * 1024) {
                                 screenDroppedRef.current.push(now);
                                 return;
                             }
-                        } catch (e) { /* bufferedAmountが取れない環境では素通し */ }
+                        } catch (e) { /* 取得できない環境では素通し */ }
 
-                        // --- 本フレームをJPEG化（画質は設定に従う） ---
+                        // --- 本フレームを画像化（画質は設定に従う。WebPが使えればWebP） ---
                         const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current] || SCREEN_QUALITY_PRESETS.medium;
                         const scale = Math.min(1, preset.width / v.videoWidth);
                         canvas.width = Math.round(v.videoWidth * scale);
@@ -1051,50 +1087,46 @@
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
 
-                        let quality = preset.quality;
-                        let dataUrl = canvas.toDataURL('image/jpeg', quality);
-                        while (dataUrl.length > SCREEN_MAX_PAYLOAD && quality > 0.25) {
-                            quality -= 0.1;
-                            dataUrl = canvas.toDataURL('image/jpeg', quality);
-                        }
-                        if (dataUrl.length > SCREEN_MAX_PAYLOAD) return; // 送れないほど大きい場合は諦める
-
-                        screenLastFrameRef.current = dataUrl;
-                        screenLastSentAtRef.current = now;
-                        screenSentCountRef.current += 1;
-
-                        // 送信完了を待って次のフレームを許可する
+                        // ここから非同期。toBlobはtoDataURLと違いbase64化しないので約25%小さい。
                         screenInFlightRef.current = true;
-                        const done = () => { screenInFlightRef.current = false; };
-                        try {
-                            const topic = `bansho/room/${activeRoomId}`;
-                            const payload = JSON.stringify({ type: 'SCREEN_FRAME', dataUrl, senderId: myClientId });
-                            mqttClientRef.current.publish(topic, payload, { qos: 0 }, done);
-                        } catch (e) {
-                            console.warn('Screen frame publish error:', e);
-                            done();
-                        }
+                        const frameW = canvas.width;
+                        canvas.toBlob(async (blob) => {
+                            const done = () => { screenInFlightRef.current = false; };
+                            try {
+                                if (!blob || blob.size > SCREEN_MAX_PAYLOAD) { done(); return; }
+                                const bytes = new Uint8Array(await blob.arrayBuffer());
+                                screenLastFrameRef.current = { bytes, mime: blob.type || SCREEN_IMAGE_TYPE };
+                                screenLastSentAtRef.current = now;
+                                screenSentCountRef.current += 1;
 
-                        // 直近5秒の実測から、実効レートと実際に出ているfpsを算出
-                        const traffic = screenTrafficRef.current;
-                        traffic.push({ t: now, bytes: dataUrl.length });
-                        while (traffic.length && now - traffic[0].t > 5000) traffic.shift();
-                        const span = traffic.length > 1 ? (now - traffic[0].t) / 1000 : 1;
-                        const kbps = Math.round(traffic.reduce((a, b) => a + b.bytes, 0) / 1024 / Math.max(1, span));
-                        const fps = Math.round((traffic.length / Math.max(1, span)) * 10) / 10;
+                                const payload = packScreenFrame(bytes, blob.type || SCREEN_IMAGE_TYPE, null);
+                                mqttClientRef.current.publish(`bansho/room/${activeRoomId}/screen`, payload, { qos: 0 });
+                                done(); // 次フレームの判断はbufferedAmountに任せる
 
-                        setScreenStats({
-                            frames: screenSentCountRef.current,
-                            kb: Math.round(dataUrl.length / 1024),
-                            kbps,
-                            fps,
-                            dropped: (function () {
+                                // 直近5秒の実測から、実効レートと実際に出ているfpsを算出
+                                const traffic = screenTrafficRef.current;
+                                traffic.push({ t: now, bytes: bytes.length });
+                                while (traffic.length && now - traffic[0].t > 5000) traffic.shift();
+                                const span = traffic.length > 1 ? (now - traffic[0].t) / 1000 : 1;
+                                const kbps = Math.round(traffic.reduce((a, b) => a + b.bytes, 0) / 1024 / Math.max(1, span));
+                                const fps = Math.round((traffic.length / Math.max(1, span)) * 10) / 10;
                                 const dw = screenDroppedRef.current;
                                 while (dw.length && now - dw[0] > 5000) dw.shift();
-                                return dw.length;
-                            })(),
-                            w: canvas.width
-                        });
+
+                                setScreenStats({
+                                    frames: screenSentCountRef.current,
+                                    kb: Math.round(bytes.length / 1024),
+                                    kbps,
+                                    fps,
+                                    dropped: dw.length,
+                                    w: frameW,
+                                    fmt: (blob.type || SCREEN_IMAGE_TYPE) === 'image/webp' ? 'WebP' : 'JPEG'
+                                });
+                            } catch (e) {
+                                console.warn('Screen frame publish error:', e);
+                                done();
+                            }
+                        }, SCREEN_IMAGE_TYPE, preset.quality);
                     };
 
                     // 実際のタイマーは下のuseEffectが張る（配信中の間隔変更に追従させるため）
@@ -1384,6 +1416,7 @@
             useEffect(() => {
                 let isMounted = true;
                 const topic = `bansho/room/${activeRoomId}`;
+                const screenTopic = `${topic}/screen`;
 
                 try {
                     console.log('Connecting to MQTT Broker for room:', activeRoomId);
@@ -1404,6 +1437,11 @@
                             if (err) console.warn('Subscribe error:', err);
                             else {
                                 if (appRole === 'participant') {
+                                    // 画面フレームは専用トピック。講師は購読しないので
+                                    // 自分の送ったフレームを受信し直す無駄が無くなる。
+                                    client.subscribe(screenTopic, { qos: 0 }, (e2) => {
+                                        if (e2) console.warn('Screen subscribe error:', e2);
+                                    });
                                     client.publish(topic, JSON.stringify({
                                         type: 'JOIN',
                                         senderId: myClientId,
@@ -1431,7 +1469,28 @@
                     });
 
                     client.on('message', (t, message) => {
-                        if (!isMounted || t !== topic) return;
+                        if (!isMounted) return;
+
+                        // --- 画面フレーム（バイナリ）---
+                        if (t === screenTopic) {
+                            if (appRole !== 'participant') return;
+                            try {
+                                const frame = unpackScreenFrame(message);
+                                if (!frame) return;
+                                if (frame.targetClientId && frame.targetClientId !== myClientId) return;
+                                const url = URL.createObjectURL(new Blob([frame.image], { type: frame.mime }));
+                                setScreenFrame(prev => {
+                                    if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                                    return url;
+                                });
+                                setIsScreenSharing(true);
+                            } catch (e) {
+                                console.warn('Screen frame decode error:', e);
+                            }
+                            return;
+                        }
+
+                        if (t !== topic) return;
                         try {
                             const data = JSON.parse(message.toString());
                             if (!data || data.senderId === myClientId) return; // 自分が送信したメッセージは無視
@@ -1465,13 +1524,16 @@
                                     }));
 
                                     // 配信中なら最新の画面フレームを個別に送る
-                                    if (screenLastFrameRef.current) {
-                                        client.publish(topic, JSON.stringify({
-                                            type: 'SCREEN_FRAME',
-                                            senderId: myClientId,
-                                            targetClientId: data.senderId,
-                                            dataUrl: screenLastFrameRef.current
-                                        }));
+                                    if (screenLastFrameRef.current && screenLastFrameRef.current.bytes) {
+                                        client.publish(
+                                            screenTopic,
+                                            packScreenFrame(
+                                                screenLastFrameRef.current.bytes,
+                                                screenLastFrameRef.current.mime,
+                                                data.senderId
+                                            ),
+                                            { qos: 0 }
+                                        );
                                     }
 
                                     // 途中参加者にもデッキを個別再送する
@@ -1510,17 +1572,16 @@
                                     }
                                     if (data.pageStart !== undefined) setSlidePageStart(data.pageStart);
                                     if (data.pageEnd !== undefined) setSlidePageEnd(data.pageEnd);
-                                } else if (data.type === 'SCREEN_FRAME') {
-                                    if (data.targetClientId && data.targetClientId !== myClientId) return;
-                                    setScreenFrame(data.dataUrl);
-                                    setIsScreenSharing(true);
                                 } else if (data.type === 'SCREEN_START') {
                                     setIsScreenSharing(true);
                                     setParticipantTab('screen');
                                     showToast('🖥️ 講師の画面配信が始まりました');
                                 } else if (data.type === 'SCREEN_STOP') {
                                     setIsScreenSharing(false);
-                                    setScreenFrame(null);
+                                    setScreenFrame(prev => {
+                                        if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                                        return null;
+                                    });
                                     setParticipantTab(prev => prev === 'screen' ? 'post' : prev);
                                 } else if (data.type === 'SYNC_SHARED_LINK') {
                                     setSharedLink(data.link || null);
@@ -2686,7 +2747,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 <span className="truncate">画面を配信中</span>
                                 {screenStats && (
                                     <span className="text-[10px] text-rose-300/90 font-mono bg-rose-900/60 border border-rose-700/50 px-1.5 py-0.5 rounded shrink-0">
-                                        {screenStats.w}px · {screenStats.kb}KB/枚 · 実測 <b className="text-white">{screenStats.fps}fps</b> · {screenStats.kbps}KB/s
+                                        {screenStats.w}px · {screenStats.fmt} {screenStats.kb}KB/枚 · 設定{screenIntervalMs / 1000}秒 → 実測 <b className="text-white">{screenStats.fps}fps</b> · {screenStats.kbps}KB/s
                                         {screenStats.dropped > 0 && (
                                             <span className="text-amber-300"> · 破棄 {screenStats.dropped}</span>
                                         )}
