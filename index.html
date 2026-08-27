@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.27.0)</title>
+    <title>研修ワークナビ AI (v1.29.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -15,6 +15,8 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- MQTT WebSocket for 100% Reliable Realtime Sync -->
     <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
+    <!-- PDF.js: 講師PC上でPDFを画像化するために使用（外部取得しないためCORS/403の影響を受けない） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -66,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.27.0";
+        const APP_VERSION = "v1.29.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -114,6 +116,123 @@
             return COLOR_PALETTE[index].id;
         };
 
+        // 推測困難なルームIDを生成（公開MQTTブローカー経由での資料流出を防ぐ）
+        const generateSecureRoomId = () => {
+            const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+            const buf = new Uint8Array(20);
+            if (window.crypto && window.crypto.getRandomValues) {
+                window.crypto.getRandomValues(buf);
+            } else {
+                for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+            }
+            return Array.from(buf, b => chars[b % chars.length]).join('');
+        };
+
+        // ============================================================
+        // 📄 スライド画像デッキの永続化（IndexedDB）
+        //   画像は数MBになるためLocalStorageではなくIndexedDBに保存する。
+        //   これにより講師がブラウザを再読み込みしても資料が消えない。
+        // ============================================================
+        const DECK_DB = 'bansho_slide_deck';
+        const DECK_STORE = 'deck';
+
+        const openDeckDb = () => new Promise((resolve, reject) => {
+            const req = indexedDB.open(DECK_DB, 1);
+            req.onupgradeneeded = () => {
+                if (!req.result.objectStoreNames.contains(DECK_STORE)) {
+                    req.result.createObjectStore(DECK_STORE);
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+
+        const deckDbPut = async (value) => {
+            const db = await openDeckDb();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(DECK_STORE, 'readwrite');
+                tx.objectStore(DECK_STORE).put(value, 'current');
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => { db.close(); reject(tx.error); };
+            });
+        };
+
+        const deckDbGet = async () => {
+            const db = await openDeckDb();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(DECK_STORE, 'readonly');
+                const req = tx.objectStore(DECK_STORE).get('current');
+                req.onsuccess = () => { db.close(); resolve(req.result || null); };
+                req.onerror = () => { db.close(); reject(req.error); };
+            });
+        };
+
+        const deckDbClear = async () => {
+            const db = await openDeckDb();
+            return new Promise((resolve) => {
+                const tx = db.transaction(DECK_STORE, 'readwrite');
+                tx.objectStore(DECK_STORE).delete('current');
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => { db.close(); resolve(); };
+            });
+        };
+
+        // ============================================================
+        // 📄 PDF → 「許可ページだけ」の画像化（講師PCのローカル処理）
+        //   MQTTの1メッセージ上限に収まるよう、幅と画質を段階的に落として調整する。
+        // ============================================================
+        const MAX_PAGE_PAYLOAD = 420 * 1024; // base64込みの1ページ上限（ブローカー1MB制限への安全域）
+
+        const renderPdfPageToJpeg = async (page, maxWidth) => {
+            const base = page.getViewport({ scale: 1 });
+            const scale = Math.min(2.5, maxWidth / base.width);
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(viewport.width));
+            canvas.height = Math.max(1, Math.round(viewport.height));
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // intent:'print' で描画すると pdf.js が requestAnimationFrame を使わなくなる。
+            // 講師が別タブ/別アプリに切り替えた（=タブが非表示の）間も変換が止まらない。
+            await page.render({ canvasContext: ctx, viewport, intent: 'print' }).promise;
+
+            let quality = 0.72;
+            let dataUrl = canvas.toDataURL('image/jpeg', quality);
+            while (dataUrl.length > MAX_PAGE_PAYLOAD && quality > 0.36) {
+                quality -= 0.12;
+                dataUrl = canvas.toDataURL('image/jpeg', quality);
+            }
+            return dataUrl;
+        };
+
+        const rasterizePdfRange = async (file, startPage, endPage, onProgress) => {
+            if (!window.pdfjsLib) {
+                throw new Error('PDF.jsの読み込みに失敗しました。通信環境を確認して再読み込みしてください。');
+            }
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+            const buffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+
+            const first = Math.min(Math.max(1, parseInt(startPage, 10) || 1), pdf.numPages);
+            const rawEnd = parseInt(endPage, 10) || 0;
+            const last = rawEnd > 0 ? Math.min(Math.max(first, rawEnd), pdf.numPages) : pdf.numPages;
+
+            const pages = [];
+            for (let p = first; p <= last; p++) {
+                const page = await pdf.getPage(p);
+                let dataUrl = '';
+                for (const w of [1280, 1024, 800]) {
+                    dataUrl = await renderPdfPageToJpeg(page, w);
+                    if (dataUrl.length <= MAX_PAGE_PAYLOAD) break;
+                }
+                pages.push({ page: p, dataUrl });
+                if (onProgress) onProgress(pages.length, last - first + 1);
+            }
+            return { pages, first, last, total: pdf.numPages };
+        };
+
         // GoogleスライドURLまたはWeb/PDF URLを埋め込み用URLに自動変換するヘルパー
         const convertToEmbedUrl = (rawUrl, pageNum = 1) => {
             if (!rawUrl || !rawUrl.trim()) return '';
@@ -145,44 +264,168 @@
         // ============================================================
         // 📄 受講者用スライドビューアー（Googleスライド公式埋め込み＋公開範囲ガイダンス）
         // ============================================================
+        // ============================================================
+        // 📄 受講者用スライドビューアー
+        //   ① デッキ方式（推奨）: 講師PCでPDFから画像化した「許可ページのみ」を表示。
+        //      受講者の端末には資料URLも範囲外ページも一切届かないため、制限が確実に効く。
+        //   ② URL方式: 従来のGoogleスライド埋め込み。クロスオリジンiframeのため
+        //      ページ制限は技術的に強制できず、案内バッジのみとなる。
+        // ============================================================
         function RestrictedSlideViewer({
             slideUrl,
+            pages = [],
+            progress = null,
             pageStart = 1,
             pageEnd = 0,
-            currentPage,
-            onPageChange,
-            showToast
+            showToast,
+            hideLockBadge = false
         }) {
-            const firstPage = Math.max(1, Number(pageStart) || 1);
-            const lastPage = pageEnd > 0 ? Math.max(firstPage, Number(pageEnd)) : 0;
+            const [index, setIndex] = useState(0);
+            const touchStartXRef = useRef(null);
+            const total = pages.length;
 
+            useEffect(() => {
+                setIndex(prev => (total === 0 ? 0 : Math.min(prev, total - 1)));
+            }, [total]);
+
+            const goPrev = () => setIndex(i => Math.max(0, i - 1));
+            const goNext = () => setIndex(i => Math.min(Math.max(0, total - 1), i + 1));
+
+            // キーボード操作（範囲外へは動かせない）
+            useEffect(() => {
+                if (total === 0) return;
+                const onKey = (e) => {
+                    if (e.key === 'ArrowLeft' || e.key === 'PageUp') goPrev();
+                    else if (e.key === 'ArrowRight' || e.key === 'PageDown') goNext();
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [total]);
+
+            // --- 資料の受信待ち ---
+            if (total === 0 && progress) {
+                const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+                return (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
+                        <i className="fa-solid fa-cloud-arrow-down text-3xl text-indigo-400 animate-bounce"></i>
+                        <p className="text-xs font-bold text-slate-200">{progress.label || '資料を受信中...'}</p>
+                        <div className="w-40 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-indigo-500 transition-all" style={{ width: pct + '%' }}></div>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-mono">{progress.done} / {progress.total}</p>
+                    </div>
+                );
+            }
+
+            // --- ① デッキ方式：許可ページの画像だけを表示 ---
+            if (total > 0) {
+                const current = pages[Math.min(index, total - 1)];
+                const receiving = !!(progress && progress.total > 0 && progress.done < progress.total);
+                return (
+                    <div className="flex-1 flex flex-col min-h-0">
+                        <div className="flex-1 w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-700 relative shadow-inner flex flex-col min-h-0">
+                            {!hideLockBadge && (
+                                <div className="bg-slate-900/95 border-b border-slate-800 text-emerald-300 text-[11px] font-bold px-3 py-1.5 flex items-center justify-between shrink-0 gap-2">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        <i className="fa-solid fa-shield-halved text-emerald-400 text-xs shrink-0"></i>
+                                        <span className="truncate">
+                                            本ワークの研修範囲:
+                                            <strong className="text-white font-mono bg-emerald-500/20 px-1.5 py-0.2 rounded border border-emerald-500/40 ml-1">
+                                                {pages[0].page} 〜 {pages[total - 1].page} ページ
+                                            </strong>
+                                        </span>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400 hidden sm:inline shrink-0">※範囲外のページは配信されていません</span>
+                                </div>
+                            )}
+
+                            <div
+                                className="flex-1 min-h-0 flex items-center justify-center bg-slate-950 relative select-none"
+                                onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX; }}
+                                onTouchEnd={(e) => {
+                                    if (touchStartXRef.current === null) return;
+                                    const dx = e.changedTouches[0].clientX - touchStartXRef.current;
+                                    touchStartXRef.current = null;
+                                    if (dx < -40) goNext();
+                                    else if (dx > 40) goPrev();
+                                }}
+                                onContextMenu={(e) => e.preventDefault()}>
+                                <img
+                                    src={current.dataUrl}
+                                    alt={'スライド ' + current.page + ' ページ'}
+                                    draggable={false}
+                                    className="max-w-full max-h-full object-contain pointer-events-none"
+                                />
+                                {index > 0 && (
+                                    <button
+                                        onClick={goPrev}
+                                        aria-label="前のページ"
+                                        className="absolute left-1 top-1/2 -translate-y-1/2 w-9 h-14 rounded-lg bg-slate-900/70 hover:bg-slate-800 text-white flex items-center justify-center shadow active:scale-95 transition">
+                                        <i className="fa-solid fa-chevron-left"></i>
+                                    </button>
+                                )}
+                                {index < total - 1 && (
+                                    <button
+                                        onClick={goNext}
+                                        aria-label="次のページ"
+                                        className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-14 rounded-lg bg-slate-900/70 hover:bg-slate-800 text-white flex items-center justify-center shadow active:scale-95 transition">
+                                        <i className="fa-solid fa-chevron-right"></i>
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="bg-slate-900 border-t border-slate-800 px-2.5 py-1.5 flex items-center justify-between shrink-0 gap-2">
+                                <button
+                                    onClick={goPrev}
+                                    disabled={index === 0}
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-white">
+                                    <i className="fa-solid fa-chevron-left text-[9px]"></i> 前へ
+                                </button>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-300 font-mono min-w-0">
+                                    <span className="font-bold text-white">{index + 1} / {total}</span>
+                                    <span className="text-slate-500">（資料 {current.page}P）</span>
+                                    {receiving && <span className="text-amber-300 animate-pulse text-[10px]">受信中…</span>}
+                                </div>
+                                <button
+                                    onClick={goNext}
+                                    disabled={index >= total - 1}
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-white">
+                                    次へ <i className="fa-solid fa-chevron-right text-[9px]"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // --- 未設定 ---
             if (!slideUrl) {
                 return (
                     <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-slate-400">
                         <i className="fa-solid fa-file-powerpoint text-4xl mb-3 text-slate-600"></i>
                         <p className="text-xs font-bold text-slate-300">スライド資料は準備中です</p>
-                        <p className="text-[10px] text-slate-500 mt-1">講師がGoogleスライドを登録するとここに表示されます</p>
+                        <p className="text-[10px] text-slate-500 mt-1">講師が資料を配信するとここに表示されます</p>
                     </div>
                 );
             }
 
+            // --- ② URL方式（従来の埋め込み・全ページ閲覧可） ---
+            const firstPage = Math.max(1, Number(pageStart) || 1);
+            const lastPage = pageEnd > 0 ? Math.max(firstPage, Number(pageEnd)) : 0;
+
             return (
-                <div className="flex-1 flex flex-col min-h-0 gap-2">
-                    {/* 📄 スライド表示エリア（直接タップ・スワイプ・キーボードで自由に閲覧可能） */}
-                    <div className="flex-1 w-full h-full rounded-xl overflow-hidden bg-slate-950 border border-slate-700 relative shadow-inner flex flex-col">
-                        {/* 🔒 講師指定の公開範囲バッジ（目立つヘッダー） */}
+                <div className="flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-700 relative shadow-inner flex flex-col min-h-0">
                         {lastPage > 0 && (
-                            <div className="bg-slate-900/95 border-b border-slate-800 text-amber-300 text-[11px] font-bold px-3 py-1.5 flex items-center justify-between shrink-0 shadow-sm">
+                            <div className="bg-slate-900/95 border-b border-slate-800 text-amber-300 text-[11px] font-bold px-3 py-1.5 flex items-center justify-between shrink-0">
                                 <div className="flex items-center gap-1.5">
-                                    <i className="fa-solid fa-lock text-amber-400 text-xs"></i>
+                                    <i className="fa-solid fa-circle-info text-amber-400 text-xs"></i>
                                     <span>本ワークの研修範囲: <strong className="text-white font-mono bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-500/40">{firstPage} 〜 {lastPage} ページ</strong></span>
                                 </div>
-                                <span className="text-[10px] text-slate-400">※スライド内をタップまたは下部バーでページ送りできます</span>
+                                <span className="text-[10px] text-slate-400 hidden sm:inline">※この方式では範囲外の閲覧を強制的には防げません</span>
                             </div>
                         )}
-
-                        {/* Googleスライド iframe本体 */}
-                        <div className="flex-1 w-full h-full relative">
+                        <div className="flex-1 w-full relative min-h-0">
                             <iframe
                                 src={convertToEmbedUrl(slideUrl)}
                                 className="w-full h-full border-0 bg-white"
@@ -218,8 +461,9 @@
             const getInitialHostRoomId = () => {
                 if (targetRoomParam) return targetRoomParam;
                 let saved = localStorage.getItem('bansho_host_room_id');
-                if (!saved) {
-                    saved = 'room-' + Math.random().toString(36).substring(2, 8);
+                // 旧仕様の短いルームID（6文字）は公開ブローカー上で推測されうるため自動で作り直す
+                if (!saved || /^room-[a-z0-9]{1,12}$/.test(saved)) {
+                    saved = 'room-' + generateSecureRoomId();
                     localStorage.setItem('bansho_host_room_id', saved);
                 }
                 return saved;
@@ -331,6 +575,15 @@
             const [showExportModal, setShowExportModal] = useState(false);
             const [showBulkModal, setShowBulkModal] = useState(false);
             const [showQrModal, setShowQrModal] = useState(false);
+
+            // 受講者に配布する公開URL（ローカル環境で開いている時のQR生成に使う）
+            const [publicBaseUrl, setPublicBaseUrl] = useState(() => {
+                return localStorage.getItem('bansho_public_base_url')
+                    || 'https://fujishinoharatt-cpu.github.io/921-Live_Scribe_TV/';
+            });
+            useEffect(() => {
+                localStorage.setItem('bansho_public_base_url', publicBaseUrl);
+            }, [publicBaseUrl]);
             const [showArchiveModal, setShowArchiveModal] = useState(false);
             const [showNewBoardModal, setShowNewBoardModal] = useState(false);
             const [showSaveSnapshotModal, setShowSaveSnapshotModal] = useState(false);
@@ -361,9 +614,26 @@
             const [slideInputPageStart, setSlideInputPageStart] = useState(1);
             const [slideInputPageEnd, setSlideInputPageEnd] = useState(0);
 
+            // 📄 受講者配信用スライドデッキ（許可ページのみを画像化したもの）
+            //    URLを配らないため、範囲外ページは受講者端末に一切存在しない
+            const [slidePages, setSlidePages] = useState([]);          // [{ page, dataUrl }]
+            const [slideDeckInfo, setSlideDeckInfo] = useState(null);  // { fileName, first, last, total }
+            const [slideDeckProgress, setSlideDeckProgress] = useState(null); // { done, total, label }
+            // 講師の手元には全ページを保持し、そのうち「公開範囲」だけを受講者へ送る。
+            // 答えのページを研修の途中でその場で開放できるようにするため。
+            const [allSlidePages, setAllSlidePages] = useState([]);
+
             const slideUrlRef = useRef(slideUrl);
             const slidePageStartRef = useRef(slidePageStart);
             const slidePageEndRef = useRef(slidePageEnd);
+            const slidePagesRef = useRef([]);
+            const slideDeckInfoRef = useRef(null);
+            const slideDeckBufferRef = useRef([]);
+            const allSlidePagesRef = useRef([]);
+            useEffect(() => { allSlidePagesRef.current = allSlidePages; }, [allSlidePages]);
+
+            useEffect(() => { slidePagesRef.current = slidePages; }, [slidePages]);
+            useEffect(() => { slideDeckInfoRef.current = slideDeckInfo; }, [slideDeckInfo]);
 
             useEffect(() => {
                 slideUrlRef.current = slideUrl;
@@ -379,32 +649,6 @@
                 slidePageEndRef.current = slidePageEnd;
                 localStorage.setItem('bansho_slide_page_end', slidePageEnd);
             }, [slidePageEnd]);
-
-            // 受講者の手元スライド現在の閲覧ページ番号
-            const [participantSlidePage, setParticipantSlidePage] = useState(() => slidePageStart || 1);
-
-            // 講師の公開ページ範囲が更新された時の自動補正
-            useEffect(() => {
-                setParticipantSlidePage(prev => {
-                    if (prev < slidePageStart) return slidePageStart;
-                    if (slidePageEnd > 0 && prev > slidePageEnd) return slidePageEnd;
-                    return prev;
-                });
-            }, [slidePageStart, slidePageEnd]);
-
-            const handleParticipantPrevSlide = () => {
-                setParticipantSlidePage(prev => Math.max(slidePageStart, prev - 1));
-            };
-
-            const handleParticipantNextSlide = () => {
-                setParticipantSlidePage(prev => {
-                    if (slidePageEnd > 0 && prev >= slidePageEnd) {
-                        showToast(`🔒 現在は ${slidePageEnd} ページまでのみ閲覧可能です（講師の進行をお待ちください）`);
-                        return prev;
-                    }
-                    return prev + 1;
-                });
-            };
 
             // ⏱️ 研修用タイマー & 🔒 投稿受付ロックの State
             const [timerSeconds, setTimerSeconds] = useState(0); // 残り秒数
@@ -423,6 +667,188 @@
             const timerTotalRef = useRef(timerTotal);
             const isSubmissionsLockedRef = useRef(isSubmissionsLocked);
 
+            // 講師のブラウザ再読み込み後もデッキを復元する
+            useEffect(() => {
+                if (appRole !== 'board') return;
+                deckDbGet().then(saved => {
+                    if (!saved || !saved.pages || saved.pages.length === 0) return;
+                    const all = saved.pages;
+                    const info = saved.info || null;
+                    const first = info && info.first ? info.first : all[0].page;
+                    const last = info && info.last ? info.last : all[all.length - 1].page;
+                    const published = all.filter(p => p.page >= first && p.page <= last);
+                    setAllSlidePages(all);
+                    allSlidePagesRef.current = all;
+                    setSlidePages(published);
+                    slidePagesRef.current = published;
+                    setSlideDeckInfo(info);
+                }).catch(() => {});
+            }, [appRole]);
+
+            // デッキを1ページ1メッセージで配信（ブローカーの1メッセージ上限とレート制限を避ける）
+            const broadcastSlideDeck = async (pages, info, targetClientId) => {
+                if (!pages || pages.length === 0) return;
+                broadcastToClients({ type: 'SLIDE_DECK_START', targetClientId, total: pages.length, info: info || null });
+                for (let i = 0; i < pages.length; i++) {
+                    broadcastToClients({
+                        type: 'SLIDE_DECK_PAGE',
+                        targetClientId,
+                        index: i,
+                        total: pages.length,
+                        page: pages[i].page,
+                        dataUrl: pages[i].dataUrl
+                    });
+                    await new Promise(r => setTimeout(r, 120));
+                }
+                broadcastToClients({ type: 'SLIDE_DECK_END', targetClientId, total: pages.length });
+            };
+
+            // PDFを読み込み、指定範囲だけを画像化して配信する
+            const handleLoadSlidePdf = async (file) => {
+                if (!file) return;
+                if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+                    showToast('⚠️ PDFファイルを選択してください');
+                    return;
+                }
+                try {
+                    setSlideDeckProgress({ done: 0, total: 0, label: 'PDFを解析中...' });
+
+                    // 全ページを画像化して講師の手元に持つ（配信するのは公開範囲だけ）。
+                    // こうしておくと、答えのページを研修中にワンクリックで開放できる。
+                    const result = await rasterizePdfRange(file, 1, 0, (done, total) => {
+                        setSlideDeckProgress({ done, total, label: '全ページを画像化中（配信は公開範囲のみ）...' });
+                    });
+
+                    const all = result.pages;
+                    const lastPageNo = all[all.length - 1].page;
+                    const first = Math.min(Math.max(1, slideInputPageStart), lastPageNo);
+                    const last = slideInputPageEnd > 0
+                        ? Math.min(Math.max(first, slideInputPageEnd), lastPageNo)
+                        : lastPageNo;
+                    const published = all.filter(p => p.page >= first && p.page <= last);
+
+                    const info = { fileName: file.name, first, last, total: result.total };
+                    setAllSlidePages(all);
+                    allSlidePagesRef.current = all;
+                    setSlidePages(published);
+                    setSlideDeckInfo(info);
+                    slidePagesRef.current = published;
+                    slideDeckInfoRef.current = info;
+                    setSlidePageStart(first);
+                    setSlidePageEnd(last);
+                    setSlideInputPageStart(first);
+                    setSlideInputPageEnd(last);
+                    deckDbPut({ pages: all, info }).catch(() => {});
+
+                    // 配信方式は排他。デッキ方式では講師側もURLを保持しない
+                    // （解除したときに古いURLが受講者へ復活するのを防ぐ）
+                    setSlideUrl('');
+                    slideUrlRef.current = '';
+                    broadcastToClients({ type: 'SYNC_SLIDE_URL', slideUrl: '', pageStart: first, pageEnd: last });
+
+                    setSlideDeckProgress({ done: 0, total: published.length, label: '受講者へ配信中...' });
+                    await broadcastSlideDeck(published, info);
+                    setSlideDeckProgress(null);
+                    setShowSlideModal(false);
+                    showToast(`📄 ${first}〜${last}ページを配信しました（手元には全${result.total}Pを保持）`);
+                } catch (e) {
+                    console.warn('PDF rasterize error:', e);
+                    setSlideDeckProgress(null);
+                    showToast('⚠️ PDFの読み込みに失敗しました: ' + (e && e.message ? e.message : e));
+                }
+            };
+
+            // 公開範囲を変更して受講者へ反映する。
+            // 末尾を伸ばしただけなら増えたページだけを送るので、答え合わせが即座に反映される。
+            const applyPublishRange = async (newStart, newEnd) => {
+                const all = allSlidePagesRef.current;
+                if (!all || all.length === 0) return;
+
+                const minPage = all[0].page;
+                const maxPage = all[all.length - 1].page;
+                const first = Math.min(Math.max(minPage, newStart), maxPage);
+                const last = Math.min(Math.max(first, newEnd), maxPage);
+                const next = all.filter(p => p.page >= first && p.page <= last);
+                const prev = slidePagesRef.current || [];
+
+                setSlidePages(next);
+                slidePagesRef.current = next;
+                setSlidePageStart(first);
+                setSlidePageEnd(last);
+                setSlideInputPageStart(first);
+                setSlideInputPageEnd(last);
+
+                const info = { ...(slideDeckInfoRef.current || {}), first, last };
+                setSlideDeckInfo(info);
+                slideDeckInfoRef.current = info;
+                deckDbPut({ pages: all, info }).catch(() => {});
+
+                broadcastToClients({ type: 'SYNC_SLIDE_URL', slideUrl: '', pageStart: first, pageEnd: last });
+
+                const isPrefix = (short, long) => short.every((p, i) => long[i] && long[i].page === p.page);
+
+                if (next.length > prev.length && isPrefix(prev, next)) {
+                    // 末尾に追加されただけ → 増えた分のみ送信
+                    for (let i = prev.length; i < next.length; i++) {
+                        broadcastToClients({
+                            type: 'SLIDE_DECK_APPEND',
+                            index: i,
+                            total: next.length,
+                            page: next[i].page,
+                            dataUrl: next[i].dataUrl
+                        });
+                        await new Promise(r => setTimeout(r, 120));
+                    }
+                } else if (next.length < prev.length && isPrefix(next, prev)) {
+                    // 末尾が減っただけ → 長さだけ伝えて切り詰める
+                    broadcastToClients({ type: 'SLIDE_DECK_TRUNCATE', total: next.length });
+                } else {
+                    // 先頭が変わったなど → 全部送り直す
+                    await broadcastSlideDeck(next, info);
+                }
+            };
+
+            // 次の1ページ（＝答えのページ）を追加で公開する
+            const handleRevealNextPage = () => {
+                const all = allSlidePagesRef.current;
+                const cur = slidePagesRef.current || [];
+                if (!all || all.length === 0) return;
+                if (cur.length > 0 && cur[cur.length - 1].page >= all[all.length - 1].page) {
+                    showToast('ℹ️ すでに最終ページまで公開しています');
+                    return;
+                }
+                const first = cur.length > 0 ? cur[0].page : all[0].page;
+                const nextLast = cur.length > 0 ? cur[cur.length - 1].page + 1 : all[0].page;
+                applyPublishRange(first, nextLast);
+                showToast(`🔓 ${nextLast} ページを公開しました`);
+            };
+
+            // 公開を1ページ戻す（出しすぎた時のリカバリ）
+            const handleHideLastPage = () => {
+                const cur = slidePagesRef.current || [];
+                if (cur.length <= 1) {
+                    showToast('ℹ️ これ以上は戻せません');
+                    return;
+                }
+                const first = cur[0].page;
+                const nextLast = cur[cur.length - 1].page - 1;
+                applyPublishRange(first, nextLast);
+                showToast(`🔒 ${nextLast + 1} ページを非公開に戻しました`);
+            };
+
+            // デッキ配信の解除
+            const handleClearSlideDeck = () => {
+                setSlidePages([]);
+                setAllSlidePages([]);
+                setSlideDeckInfo(null);
+                slidePagesRef.current = [];
+                allSlidePagesRef.current = [];
+                slideDeckInfoRef.current = null;
+                deckDbClear().catch(() => {});
+                broadcastToClients({ type: 'SLIDE_DECK_CLEAR' });
+                showToast('📄 スライド配信を解除しました');
+            };
+
             const handleSaveSlideUrl = (url, startP = 1, endP = 0) => {
                 const sNum = Math.max(1, parseInt(startP, 10) || 1);
                 const eNum = Math.max(0, parseInt(endP, 10) || 0);
@@ -434,6 +860,16 @@
                 setSlidePageStart(sNum);
                 setSlidePageEnd(eNum);
                 setShowSlideModal(false);
+
+                // URL方式とデッキ方式は排他。URLを保存した時点で画像配信は解除する
+                if (slidePagesRef.current.length > 0) {
+                    setSlidePages([]);
+                    setSlideDeckInfo(null);
+                    slidePagesRef.current = [];
+                    slideDeckInfoRef.current = null;
+                    deckDbClear().catch(() => {});
+                    broadcastToClients({ type: 'SLIDE_DECK_CLEAR' });
+                }
 
                 // 受講者へも元URLを送信
                 broadcastToClients({ 
@@ -690,10 +1126,16 @@
                                             isRunning: isTimerRunningRef.current
                                         },
                                         isLocked: isSubmissionsLockedRef.current,
-                                        slideUrl: slideUrlRef.current,
+                                        // デッキ配信中は受講者へURLを渡さない（範囲外の先読みを物理的に不可能にする）
+                                        slideUrl: slidePagesRef.current.length > 0 ? '' : slideUrlRef.current,
                                         pageStart: slidePageStartRef.current,
                                         pageEnd: slidePageEndRef.current
                                     }));
+
+                                    // 途中参加者にもデッキを個別再送する
+                                    if (slidePagesRef.current.length > 0) {
+                                        broadcastSlideDeck(slidePagesRef.current, slideDeckInfoRef.current, data.senderId);
+                                    }
                                 } else if (data.type === 'NEW_CARD') {
                                     setCards(prev => {
                                         const next = [data.card, ...prev];
@@ -735,6 +1177,47 @@
                                         const rText = data.pageEnd > 0 ? ` (公開範囲: ${data.pageStart || 1}〜${data.pageEnd}P)` : '';
                                         showToast(`📄 研修スライド資料が更新されました${rText}`);
                                     }
+                                } else if (data.type === 'SLIDE_DECK_START') {
+                                    if (data.targetClientId && data.targetClientId !== myClientId) return;
+                                    slideDeckBufferRef.current = new Array(data.total).fill(null);
+                                    setSlideDeckInfo(data.info || null);
+                                    setSlideDeckProgress({ done: 0, total: data.total, label: '研修資料を受信中...' });
+                                } else if (data.type === 'SLIDE_DECK_PAGE') {
+                                    if (data.targetClientId && data.targetClientId !== myClientId) return;
+                                    if (!slideDeckBufferRef.current || slideDeckBufferRef.current.length !== data.total) {
+                                        slideDeckBufferRef.current = new Array(data.total).fill(null);
+                                    }
+                                    slideDeckBufferRef.current[data.index] = { page: data.page, dataUrl: data.dataUrl };
+                                    const arrived = slideDeckBufferRef.current.filter(Boolean);
+                                    setSlideDeckProgress({ done: arrived.length, total: data.total, label: '研修資料を受信中...' });
+                                    setSlidePages(arrived); // 届いたページから順に閲覧できる
+                                    setSlideUrl('');
+                                } else if (data.type === 'SLIDE_DECK_END') {
+                                    if (data.targetClientId && data.targetClientId !== myClientId) return;
+                                    const arrived = (slideDeckBufferRef.current || []).filter(Boolean);
+                                    setSlidePages(arrived);
+                                    setSlideDeckProgress(null);
+                                    setSlideUrl('');
+                                    if (arrived.length > 0) {
+                                        showToast(`📄 研修スライド（${arrived[0].page}〜${arrived[arrived.length - 1].page}P）を受信しました`);
+                                    }
+                                } else if (data.type === 'SLIDE_DECK_APPEND') {
+                                    if (data.targetClientId && data.targetClientId !== myClientId) return;
+                                    const buf = slideDeckBufferRef.current || [];
+                                    buf[data.index] = { page: data.page, dataUrl: data.dataUrl };
+                                    slideDeckBufferRef.current = buf;
+                                    setSlidePages(buf.filter(Boolean));
+                                    showToast(`🔓 ${data.page} ページが公開されました`);
+                                } else if (data.type === 'SLIDE_DECK_TRUNCATE') {
+                                    if (data.targetClientId && data.targetClientId !== myClientId) return;
+                                    const buf = (slideDeckBufferRef.current || []).filter(Boolean).slice(0, data.total);
+                                    slideDeckBufferRef.current = buf;
+                                    setSlidePages(buf);
+                                } else if (data.type === 'SLIDE_DECK_CLEAR') {
+                                    slideDeckBufferRef.current = [];
+                                    setSlidePages([]);
+                                    setSlideDeckInfo(null);
+                                    setSlideDeckProgress(null);
                                 } else if (data.type === 'SYNC_TIMER') {
                                     setTimerSeconds(data.seconds || 0);
                                     setTimerTotal(data.total || 0);
@@ -1600,7 +2083,20 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
 
             // 参加者用URL生成
             const participantUrl = `${window.location.origin}${window.location.pathname}?role=participant&room=${activeRoomId}`;
-            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(participantUrl)}`;
+
+            // ローカル環境（file:// や localhost）で開いているとQRの読み取りに成功しても
+            // 受講者のスマホからはそのURLに到達できない。その場合は公開URLでQRを作る。
+            const isLocalOrigin =
+                window.location.protocol === 'file:' ||
+                /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(window.location.hostname);
+
+            const qrTargetUrl = (isLocalOrigin && publicBaseUrl.trim())
+                ? `${publicBaseUrl.trim().replace(/\/*$/, '/')}?role=participant&room=${activeRoomId}`
+                : participantUrl;
+
+            // 高解像度で生成する。表示サイズ(256px)より十分大きい画像でないと
+            // 高DPI/拡大表示のPCで補間ボケが起き、スマホのカメラが読み取れない。
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=50&data=${encodeURIComponent(qrTargetUrl)}`;
             const uncategorizedCards = cards.filter(c => c.categoryId === null);
 
             return (
@@ -2075,13 +2571,13 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                 )}
                                             </div>
 
-                                            {slideUrl ? (
+                                            {(slideUrl || slidePages.length > 0 || slideDeckProgress) ? (
                                                 <RestrictedSlideViewer
                                                     slideUrl={slideUrl}
+                                                    pages={slidePages}
+                                                    progress={slideDeckProgress}
                                                     pageStart={slidePageStart}
                                                     pageEnd={slidePageEnd}
-                                                    currentPage={participantSlidePage}
-                                                    onPageChange={setParticipantSlidePage}
                                                     showToast={showToast}
                                                 />
                                             ) : (
@@ -2147,13 +2643,13 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     <div className="flex-1 min-h-0 p-3 bg-slate-900/60 overflow-hidden flex flex-col">
                                         {participantPcTab === 'slide' ? (
                                             /* スライド埋め込み */
-                                            slideUrl ? (
+                                            (slideUrl || slidePages.length > 0 || slideDeckProgress) ? (
                                                 <RestrictedSlideViewer
                                                     slideUrl={slideUrl}
+                                                    pages={slidePages}
+                                                    progress={slideDeckProgress}
                                                     pageStart={slidePageStart}
                                                     pageEnd={slidePageEnd}
-                                                    currentPage={participantSlidePage}
-                                                    onPageChange={setParticipantSlidePage}
                                                     showToast={showToast}
                                                 />
                                             ) : (
@@ -2443,10 +2939,10 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     </button>
                     <button
                         onClick={() => {
-                            if (!slideUrl) {
+                            if (!slideUrl && slidePages.length === 0 && allSlidePages.length === 0) {
                                 setSlideInputUrl('');
                                 setShowSlideModal(true);
-                                showToast('💡 GoogleスライドまたはPDFのURLを設定してください');
+                                showToast('💡 PDFを読み込むか、資料URLを設定してください');
                             } else {
                                 setViewMode('slide');
                             }
@@ -2474,13 +2970,37 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                             )}
                         </div>
                         <div className="flex items-center gap-2">
-                            <button 
+                            {/* 🔓 答えのページをその場で開放するコントロール */}
+                            {allSlidePages.length > 0 && (
+                                <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1">
+                                    <span className="text-[10px] text-slate-400 font-medium">受講者へ公開中</span>
+                                    <span className="text-[11px] font-mono font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 px-1.5 rounded">
+                                        {slidePages.length > 0 ? `${slidePages[0].page}〜${slidePages[slidePages.length - 1].page}` : '—'}
+                                        <span className="text-slate-500"> / 全{allSlidePages.length}P</span>
+                                    </span>
+                                    <button
+                                        onClick={handleHideLastPage}
+                                        disabled={slidePages.length <= 1}
+                                        title="公開を1ページ戻す"
+                                        className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition">
+                                        <i className="fa-solid fa-minus text-[10px]"></i>
+                                    </button>
+                                    <button
+                                        onClick={handleRevealNextPage}
+                                        disabled={slidePages.length > 0 && allSlidePages.length > 0 && slidePages[slidePages.length - 1].page >= allSlidePages[allSlidePages.length - 1].page}
+                                        title="次の1ページ（答え）を受講者へ公開する"
+                                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] disabled:opacity-30 disabled:cursor-not-allowed transition flex items-center gap-1 active:scale-95">
+                                        <i className="fa-solid fa-lock-open text-[9px]"></i> 次の1P公開
+                                    </button>
+                                </div>
+                            )}
+                            <button
                                 onClick={() => {
                                     setSlideInputUrl(slideUrl);
                                     setShowSlideModal(true);
                                 }}
                                 className="text-slate-400 hover:text-white px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 transition flex items-center gap-1 font-medium">
-                                <i className="fa-solid fa-pen"></i> URL変更
+                                <i className="fa-solid fa-pen"></i> 資料変更
                             </button>
                             <button 
                                 onClick={() => setViewMode('kanban')}
@@ -2490,7 +3010,25 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         </div>
                     </div>
                     <div className="flex-1 w-full h-full p-2 bg-slate-900 flex items-center justify-center">
-                        {slideUrl ? (
+                        {allSlidePages.length > 0 ? (
+                            <div className="w-full h-full flex">
+                                {/* 講師の投影は全ページ。受講者に届いているのは公開範囲だけ */}
+                                <RestrictedSlideViewer
+                                    pages={allSlidePages}
+                                    progress={slideDeckProgress}
+                                    hideLockBadge={true}
+                                    showToast={showToast}
+                                />
+                            </div>
+                        ) : slidePages.length > 0 ? (
+                            <div className="w-full h-full flex">
+                                <RestrictedSlideViewer
+                                    pages={slidePages}
+                                    progress={slideDeckProgress}
+                                    showToast={showToast}
+                                />
+                            </div>
+                        ) : slideUrl ? (
                             <iframe
                                 src={convertToEmbedUrl(slideUrl)}
                                 className="w-full h-full rounded-xl border border-slate-800 shadow-2xl bg-white"
@@ -2500,11 +3038,11 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         ) : (
                             <div className="text-center text-slate-400">
                                 <i className="fa-solid fa-file-powerpoint text-4xl mb-3 text-slate-600"></i>
-                                <p className="font-bold text-sm">スライドURLが未設定です</p>
+                                <p className="font-bold text-sm">スライド資料が未設定です</p>
                                 <button
                                     onClick={() => setShowSlideModal(true)}
                                     className="mt-3 bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-500 transition">
-                                    GoogleスライドURLを設定する
+                                    研修スライドを設定する
                                 </button>
                             </div>
                         )}
@@ -2700,20 +3238,42 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 <p className="text-xs text-slate-500 mb-4">
                                     受講者の皆様はスマートフォンのカメラで以下のQRコードを読み取ると、直接意見投稿フォームが開きます。
                                 </p>
-                                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 inline-block mb-4">
-                                    <img 
-                                        src={qrImageUrl} 
-                                        alt="QR Code" 
-                                        className="w-48 h-48 mx-auto rounded-lg shadow-sm"
+
+                                {/* ⚠️ ローカル環境で開いている場合の警告（スマホからは到達できない） */}
+                                {isLocalOrigin && (
+                                    <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 text-left space-y-2">
+                                        <p className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
+                                            <i className="fa-solid fa-triangle-exclamation"></i>
+                                            この画面はローカル環境（{window.location.protocol === 'file:' ? 'file://' : window.location.hostname}）で開いています
+                                        </p>
+                                        <p className="text-[10px] text-amber-800 leading-relaxed">
+                                            このPCのURLは受講者のスマホからは開けません。下の<b>公開URL</b>でQRコードを作成しています。
+                                            GitHub Pages のURLが違う場合はここを直してください。
+                                        </p>
+                                        <input
+                                            type="url"
+                                            value={publicBaseUrl}
+                                            onChange={(e) => setPublicBaseUrl(e.target.value)}
+                                            placeholder="https://<ユーザー名>.github.io/<リポジトリ名>/"
+                                            className="w-full border border-amber-300 rounded-lg p-2 text-[11px] font-mono bg-white focus:ring-2 focus:ring-amber-400 focus:outline-none"
+                                        />
+                                    </div>
+                                )}
+
+                                <div className="bg-white p-5 rounded-2xl border border-slate-200 inline-block mb-4">
+                                    <img
+                                        src={qrImageUrl}
+                                        alt="QR Code"
+                                        className="w-64 h-64 mx-auto block"
                                     />
                                 </div>
                                 <div className="text-[11px] text-slate-400 font-mono mb-4 break-all bg-slate-100 p-2 rounded-lg">
-                                    {participantUrl}
+                                    {qrTargetUrl}
                                 </div>
                                 <div className="space-y-2">
                                     <button 
                                         onClick={() => {
-                                            navigator.clipboard.writeText(participantUrl);
+                                            navigator.clipboard.writeText(qrTargetUrl);
                                             showToast('参加者用URLをコピーしました！');
                                         }}
                                         className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2">
@@ -3038,51 +3598,22 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 </div>
 
                                 <div className="space-y-4">
-                                    <div className="bg-indigo-50/80 p-3 rounded-xl border border-indigo-100 text-[11px] text-indigo-900 space-y-1.5">
-                                        <p className="font-bold flex items-center gap-1.5">
-                                            <i className="fa-solid fa-lightbulb text-amber-500"></i>
-                                            対応している資料形式
-                                        </p>
-                                        <ul className="list-disc pl-4 space-y-0.5 text-indigo-800">
-                                            <li><b>Googleスライド</b>: 共有リンクをそのまま貼り付けで自動埋め込み変換</li>
-                                            <li><b>Googleドライブ上のPDF</b>: 共有リンク貼り付けでプレビュー表示</li>
-                                            <li><b>その他のWeb公開資料/PDF URL</b>: 直接埋め込み表示</li>
-                                        </ul>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                                            スライドまたはPDFのURL
-                                        </label>
-                                        <input 
-                                            type="url"
-                                            value={slideInputUrl}
-                                            onChange={(e) => setSlideInputUrl(e.target.value)}
-                                            placeholder="https://docs.google.com/presentation/d/.../edit"
-                                            className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                            autoFocus
-                                        />
-                                        <p className="text-[10px] text-slate-400 mt-1">
-                                            ※登録すると講師の大画面と受講生の画面にリアルタイムで共有されます。
-                                        </p>
-                                    </div>
-
-                                    {/* 🔒 受講者の公開ページ制限設定 */}
+                                    {/* ① 受講者に見せるページ範囲 */}
                                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
                                         <div className="flex items-center justify-between">
                                             <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                                                <i className="fa-solid fa-lock text-indigo-600 text-[11px]"></i>
-                                                受講者の公開ページ制限
+                                                <span className="bg-slate-800 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">1</span>
+                                                最初に公開するページ範囲
                                             </label>
                                             <span className="text-[10px] text-slate-500">
-                                                {slideInputPageEnd > 0 ? `${slideInputPageStart} 〜 ${slideInputPageEnd} ページのみ公開` : '全ページ公開中'}
+                                                {slideInputPageEnd > 0 ? `${slideInputPageStart} 〜 ${slideInputPageEnd} ページのみ` : '全ページ'}
                                             </span>
                                         </div>
 
                                         <div className="flex items-center gap-2">
                                             <div className="flex items-center gap-1 flex-1">
                                                 <span className="text-xs text-slate-600 font-medium">開始:</span>
-                                                <input 
+                                                <input
                                                     type="number"
                                                     min="1"
                                                     value={slideInputPageStart}
@@ -3094,7 +3625,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             <span className="text-slate-400 font-bold">〜</span>
                                             <div className="flex items-center gap-1 flex-1">
                                                 <span className="text-xs text-slate-600 font-medium">終了:</span>
-                                                <input 
+                                                <input
                                                     type="number"
                                                     min="0"
                                                     value={slideInputPageEnd}
@@ -3109,37 +3640,123 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         {/* クイック選択プリセットボタン */}
                                         <div className="flex items-center gap-1.5 flex-wrap pt-1">
                                             <span className="text-[10px] text-slate-400 font-medium">プリセット:</span>
-                                            <button 
+                                            <button
                                                 type="button"
                                                 onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(0); }}
                                                 className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageEnd === 0 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
                                                 全ページ
                                             </button>
-                                            <button 
+                                            <button
                                                 type="button"
                                                 onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(3); }}
                                                 className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 1 && slideInputPageEnd === 3 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
                                                 1〜3P
                                             </button>
-                                            <button 
+                                            <button
                                                 type="button"
                                                 onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(5); }}
                                                 className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 1 && slideInputPageEnd === 5 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
                                                 1〜5P
                                             </button>
-                                            <button 
+                                            <button
                                                 type="button"
                                                 onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(10); }}
                                                 className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 1 && slideInputPageEnd === 10 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
                                                 1〜10P
                                             </button>
-                                            <button 
+                                            <button
                                                 type="button"
                                                 onClick={() => { setSlideInputPageStart(6); setSlideInputPageEnd(10); }}
                                                 className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 6 && slideInputPageEnd === 10 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
                                                 6〜10P
                                             </button>
                                         </div>
+                                    </div>
+
+                                    {/* ② 方式A: PDFを読み込んで許可ページだけを配信（推奨） */}
+                                    <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-200 space-y-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="bg-emerald-600 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">2</span>
+                                            <span className="text-xs font-bold text-emerald-900">方式A: PDFを配信（制限が確実に効く・推奨）</span>
+                                        </div>
+                                        <p className="text-[10px] text-emerald-800 leading-relaxed">
+                                            Googleスライド / Googleドキュメントは <b>ファイル → ダウンロード → PDF</b> で書き出してから選んでください。
+                                            指定範囲のページだけを講師PC上で画像化して送るため、<b>受講者の端末には資料URLも範囲外ページも一切届きません。</b>
+                                        </p>
+                                        <p className="text-[10px] text-emerald-900 bg-white border border-emerald-200 rounded-lg p-2 leading-relaxed">
+                                            <i className="fa-solid fa-lock-open text-emerald-600 mr-1"></i>
+                                            答えが次ページにある場合は、<b>手前のページまで</b>を指定してください。
+                                            投影画面の「<b>次の1P公開</b>」ボタンで、答え合わせのタイミングに1ページずつ開放できます
+                                            （講師の投影には全ページが表示されます）。
+                                        </p>
+
+                                        <input
+                                            type="file"
+                                            accept="application/pdf,.pdf"
+                                            disabled={!!slideDeckProgress}
+                                            onChange={(e) => {
+                                                const f = e.target.files && e.target.files[0];
+                                                e.target.value = '';
+                                                handleLoadSlidePdf(f);
+                                            }}
+                                            className="w-full text-[11px] text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[11px] file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 file:cursor-pointer disabled:opacity-50"
+                                        />
+
+                                        {slideDeckProgress && (
+                                            <div className="bg-white rounded-lg border border-emerald-200 p-2 space-y-1">
+                                                <div className="flex items-center justify-between text-[10px] font-bold text-emerald-800">
+                                                    <span><i className="fa-solid fa-spinner fa-spin mr-1"></i>{slideDeckProgress.label}</span>
+                                                    <span className="font-mono">{slideDeckProgress.done} / {slideDeckProgress.total}</span>
+                                                </div>
+                                                <div className="h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-emerald-500 transition-all"
+                                                        style={{ width: (slideDeckProgress.total > 0 ? Math.round((slideDeckProgress.done / slideDeckProgress.total) * 100) : 0) + '%' }}></div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {slideDeckInfo && slidePages.length > 0 && !slideDeckProgress && (
+                                            <div className="bg-white rounded-lg border border-emerald-200 p-2 flex items-center justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <p className="text-[11px] font-bold text-emerald-900 truncate">
+                                                        <i className="fa-solid fa-circle-check text-emerald-600 mr-1"></i>
+                                                        配信中: {slideDeckInfo.fileName}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-500 font-mono">
+                                                        {slideDeckInfo.first}〜{slideDeckInfo.last}P（全{slideDeckInfo.total}P中 / {slidePages.length}枚）
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleClearSlideDeck}
+                                                    className="shrink-0 text-[10px] font-bold text-rose-600 hover:text-rose-800 border border-rose-200 hover:bg-rose-50 rounded-lg px-2 py-1 transition">
+                                                    配信を解除
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* ③ 方式B: URLをそのまま共有（制限なし） */}
+                                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="bg-slate-400 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">3</span>
+                                            <span className="text-xs font-bold text-slate-700">方式B: URLをそのまま共有（全ページ閲覧可）</span>
+                                        </div>
+                                        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed">
+                                            <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+                                            この方式では<b>ページ制限を強制できません</b>。埋め込みは別サイト（Google）の画面のため操作を止められず、URL自体も受講者に渡ります。範囲表示はあくまで「案内」です。制限が必要なら方式Aを使ってください。
+                                        </p>
+                                        <input
+                                            type="url"
+                                            value={slideInputUrl}
+                                            onChange={(e) => setSlideInputUrl(e.target.value)}
+                                            placeholder="https://docs.google.com/presentation/d/.../edit"
+                                            className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                        />
+                                        <p className="text-[10px] text-slate-400">
+                                            対応: Googleスライド / Googleドライブ上のPDF / その他のWeb公開資料URL
+                                        </p>
                                     </div>
 
                                     <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
@@ -3153,7 +3770,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                 onClick={() => handleSaveSlideUrl(slideInputUrl, slideInputPageStart, slideInputPageEnd)}
                                                 className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow transition flex items-center justify-center gap-1.5 cursor-pointer">
                                                 <i className="fa-solid fa-check"></i>
-                                                保存して同期
+                                                URLを保存して共有
                                             </button>
                                         </div>
 
