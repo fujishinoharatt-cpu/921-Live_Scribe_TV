@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.41.0)</title>
+    <title>研修ワークナビ AI (v1.42.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.41.0";
+        const APP_VERSION = "v1.42.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -3082,56 +3082,56 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             <div className="bg-slate-800/95 rounded-2xl p-2.5 border border-slate-700 shadow-xl backdrop-blur-sm shrink-0 flex flex-col gap-2">
                                                 {/* 名前入力 & 班カラーパレット */}
                                                 <div className="flex flex-col gap-1.5">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span className="text-[11px] font-bold text-slate-300 shrink-0">お名前/班:</span>
-                                                        <div className="relative flex-1">
-                                                            <input 
-                                                                type="text"
-                                                                value={participantName}
-                                                                onChange={(e) => handleParticipantNameChange(e.target.value)}
-                                                                placeholder="例: 山田 / A班"
-                                                                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 pl-6"
-                                                            />
-                                                            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs">
-                                                                {getAvatarByName(participantName)}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* 🎨 色選択（畳んだ状態は1行。タップで大きな一覧を開く） */}
+                                                    {/* 名前と色を横並びにし、行の高さを揃える */}
                                                     {(() => {
                                                         const sel = COLOR_PALETTE.find(c => c.id === selectedColor) || COLOR_PALETTE[0];
                                                         return (
-                                                            <div className="pt-0.5">
+                                                            <div className="flex items-stretch gap-1.5">
+                                                                <div className="relative flex-1 min-w-0">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={participantName}
+                                                                        onChange={(e) => handleParticipantNameChange(e.target.value)}
+                                                                        placeholder="お名前 / 班"
+                                                                        className="w-full h-11 bg-slate-900 border border-slate-600 rounded-lg pl-8 pr-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                                    />
+                                                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-base pointer-events-none">
+                                                                        {getAvatarByName(participantName)}
+                                                                    </span>
+                                                                </div>
+
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => setShowColorPicker(v => !v)}
-                                                                    className="w-full min-h-[44px] flex items-center gap-2 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 active:scale-[0.99] transition">
-                                                                    <span className="text-[10px] font-bold text-slate-400 shrink-0">色</span>
-                                                                    <span className={`w-8 h-8 rounded-md flex items-center justify-center font-mono font-bold text-sm shrink-0 ${sel.bg} ${sel.text}`}>
+                                                                    title={`付箋の色: ${sel.name}`}
+                                                                    className="h-11 shrink-0 flex items-center gap-1.5 bg-slate-900 border border-slate-600 rounded-lg px-2 active:scale-[0.98] transition">
+                                                                    <span className={`w-7 h-7 rounded-md flex items-center justify-center font-mono font-bold text-sm shrink-0 ${sel.bg} ${sel.text}`}>
                                                                         {sel.numLabel}
                                                                     </span>
-                                                                    <span className="text-[11px] text-slate-200 font-bold truncate flex-1 text-left">{sel.name}</span>
-                                                                    <i className={`fa-solid ${showColorPicker ? 'fa-chevron-up' : 'fa-chevron-down'} text-slate-400 text-xs shrink-0`}></i>
+                                                                    <span className="text-[10px] text-slate-200 font-bold truncate max-w-[64px] hidden min-[340px]:inline">
+                                                                        {sel.name.replace(/\s*\(.*\)$/, '')}
+                                                                    </span>
+                                                                    <i className={`fa-solid ${showColorPicker ? 'fa-chevron-up' : 'fa-chevron-down'} text-slate-400 text-[10px] shrink-0`}></i>
                                                                 </button>
-
-                                                                {showColorPicker && (
-                                                                    <div className="mt-1.5 grid grid-cols-5 gap-1.5 bg-slate-900 border border-slate-600 rounded-lg p-2">
-                                                                        {COLOR_PALETTE.map((c) => (
-                                                                            <button
-                                                                                key={c.id}
-                                                                                type="button"
-                                                                                onClick={() => { setSelectedColor(c.id); setShowColorPicker(false); }}
-                                                                                title={c.name}
-                                                                                className={`h-12 rounded-lg flex items-center justify-center font-mono font-bold text-base transition ${c.bg} ${c.text} ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow' : 'opacity-80 active:opacity-100'}`}>
-                                                                                {c.numLabel}
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
                                                             </div>
                                                         );
                                                     })()}
+
+                                                    {/* 🎨 色の一覧（上の色ボタンで開閉。選ぶと自動で閉じる） */}
+                                                    {showColorPicker && (
+                                                        <div className="grid grid-cols-5 gap-1.5 bg-slate-900 border border-slate-600 rounded-lg p-2">
+                                                            {COLOR_PALETTE.map((c) => (
+                                                                <button
+                                                                    key={c.id}
+                                                                    type="button"
+                                                                    onClick={() => { setSelectedColor(c.id); setShowColorPicker(false); }}
+                                                                    title={c.name}
+                                                                    className={`h-12 rounded-lg flex items-center justify-center font-mono font-bold text-base transition ${c.bg} ${c.text} ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow' : 'opacity-80 active:opacity-100'}`}>
+                                                                    {c.numLabel}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 <form onSubmit={handleSendParticipantCard} className="flex flex-col gap-1.5">
