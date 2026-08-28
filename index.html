@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.40.0)</title>
+    <title>研修ワークナビ AI (v1.41.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.40.0";
+        const APP_VERSION = "v1.41.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -743,6 +743,9 @@
             // スライドの表示中ページ。ビューアーが作り直されても位置を保つために親で持つ。
             const [boardSlidePage, setBoardSlidePage] = useState(0);      // 講師の投影ビュー用
             const [viewerSlidePage, setViewerSlidePage] = useState(0);    // 受講者ビュー用
+
+            // 受講者スマホの色選択を開いているか（畳んでいる間は1行しか使わない）
+            const [showColorPicker, setShowColorPicker] = useState(false);
 
             const [showSlideModal, setShowSlideModal] = useState(false);
             const [slideInputUrl, setSlideInputUrl] = useState('');
@@ -3095,19 +3098,40 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                         </div>
                                                     </div>
 
-                                                    <div className="flex items-center gap-1 overflow-x-auto pb-0.5 pt-0.5">
-                                                        <span className="text-[10px] font-bold text-slate-400 shrink-0 mr-0.5">色:</span>
-                                                        {COLOR_PALETTE.map((c) => (
-                                                            <button
-                                                                key={c.id}
-                                                                type="button"
-                                                                onClick={() => setSelectedColor(c.id)}
-                                                                title={c.name}
-                                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition shrink-0 cursor-pointer ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow-sm ' + c.id : 'opacity-70 hover:opacity-100 ' + c.id}`}>
-                                                                {c.label}
-                                                            </button>
-                                                        ))}
-                                                    </div>
+                                                    {/* 🎨 色選択（畳んだ状態は1行。タップで大きな一覧を開く） */}
+                                                    {(() => {
+                                                        const sel = COLOR_PALETTE.find(c => c.id === selectedColor) || COLOR_PALETTE[0];
+                                                        return (
+                                                            <div className="pt-0.5">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setShowColorPicker(v => !v)}
+                                                                    className="w-full min-h-[44px] flex items-center gap-2 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 active:scale-[0.99] transition">
+                                                                    <span className="text-[10px] font-bold text-slate-400 shrink-0">色</span>
+                                                                    <span className={`w-8 h-8 rounded-md flex items-center justify-center font-mono font-bold text-sm shrink-0 ${sel.bg} ${sel.text}`}>
+                                                                        {sel.numLabel}
+                                                                    </span>
+                                                                    <span className="text-[11px] text-slate-200 font-bold truncate flex-1 text-left">{sel.name}</span>
+                                                                    <i className={`fa-solid ${showColorPicker ? 'fa-chevron-up' : 'fa-chevron-down'} text-slate-400 text-xs shrink-0`}></i>
+                                                                </button>
+
+                                                                {showColorPicker && (
+                                                                    <div className="mt-1.5 grid grid-cols-5 gap-1.5 bg-slate-900 border border-slate-600 rounded-lg p-2">
+                                                                        {COLOR_PALETTE.map((c) => (
+                                                                            <button
+                                                                                key={c.id}
+                                                                                type="button"
+                                                                                onClick={() => { setSelectedColor(c.id); setShowColorPicker(false); }}
+                                                                                title={c.name}
+                                                                                className={`h-12 rounded-lg flex items-center justify-center font-mono font-bold text-base transition ${c.bg} ${c.text} ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow' : 'opacity-80 active:opacity-100'}`}>
+                                                                                {c.numLabel}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
 
                                                 <form onSubmit={handleSendParticipantCard} className="flex flex-col gap-1.5">
@@ -3433,7 +3457,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                                        <div className="flex items-center gap-1.5 flex-wrap pb-0.5">
                                             <span className="text-[10px] font-bold text-slate-400 shrink-0 mr-0.5">色:</span>
                                             {COLOR_PALETTE.map((c) => (
                                                 <button
@@ -3441,8 +3465,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                     type="button"
                                                     onClick={() => setSelectedColor(c.id)}
                                                     title={c.name}
-                                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition shrink-0 cursor-pointer ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow-sm ' + c.id : 'opacity-70 hover:opacity-100 ' + c.id}`}>
-                                                    {c.label}
+                                                    className={`w-8 h-8 rounded-md flex items-center justify-center font-mono font-bold text-xs border transition shrink-0 cursor-pointer ${c.bg} ${c.text} ${selectedColor === c.id ? 'ring-2 ring-indigo-400 scale-105 shadow-sm' : 'opacity-70 hover:opacity-100'}`}>
+                                                    {c.numLabel}
                                                 </button>
                                             ))}
                                         </div>
