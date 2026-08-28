@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.39.0)</title>
+    <title>研修ワークナビ AI (v1.40.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.39.0";
+        const APP_VERSION = "v1.40.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -328,18 +328,40 @@
             pageStart = 1,
             pageEnd = 0,
             showToast,
-            hideLockBadge = false
+            hideLockBadge = false,
+            index: indexProp,
+            onIndexChange
         }) {
-            const [index, setIndex] = useState(0);
-            const touchStartXRef = useRef(null);
+            // 現在ページは外から渡すこともできる。
+            //   板書ボードとスライド投影を行き来するとビューアーが作り直されるため、
+            //   内部だけで持つと毎回1ページ目に戻ってしまう。親で保持すれば維持される。
+            const controlled = typeof indexProp === 'number' && typeof onIndexChange === 'function';
+            const [innerIndex, setInnerIndex] = useState(0);
             const total = pages.length;
+            const index = Math.max(0, Math.min(controlled ? indexProp : innerIndex, Math.max(0, total - 1)));
+
+            const touchStartXRef = useRef(null);
+            const indexRef = useRef(index);
+            indexRef.current = index;
+
+            // キーボードのハンドラからも常に最新のページ番号を見られるようrefを経由する
+            const setIndex = (updater) => {
+                const cur = indexRef.current;
+                const raw = typeof updater === 'function' ? updater(cur) : updater;
+                const next = Math.max(0, Math.min(raw, Math.max(0, total - 1)));
+                if (next === cur) return;
+                indexRef.current = next;
+                if (controlled) onIndexChange(next);
+                else setInnerIndex(next);
+            };
 
             useEffect(() => {
-                setIndex(prev => (total === 0 ? 0 : Math.min(prev, total - 1)));
+                // ページ数が減った場合だけ範囲内に丸める
+                if (total > 0 && indexRef.current > total - 1) setIndex(total - 1);
             }, [total]);
 
-            const goPrev = () => setIndex(i => Math.max(0, i - 1));
-            const goNext = () => setIndex(i => Math.min(Math.max(0, total - 1), i + 1));
+            const goPrev = () => setIndex(i => i - 1);
+            const goNext = () => setIndex(i => i + 1);
 
             // キーボード操作（範囲外へは動かせない）
             useEffect(() => {
@@ -717,6 +739,10 @@
             const [showLinkModal, setShowLinkModal] = useState(false);
             const [linkInputUrl, setLinkInputUrl] = useState('');
             const [linkInputLabel, setLinkInputLabel] = useState('');
+
+            // スライドの表示中ページ。ビューアーが作り直されても位置を保つために親で持つ。
+            const [boardSlidePage, setBoardSlidePage] = useState(0);      // 講師の投影ビュー用
+            const [viewerSlidePage, setViewerSlidePage] = useState(0);    // 受講者ビュー用
 
             const [showSlideModal, setShowSlideModal] = useState(false);
             const [slideInputUrl, setSlideInputUrl] = useState('');
@@ -3224,6 +3250,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                     pageStart={slidePageStart}
                                                     pageEnd={slidePageEnd}
                                                     showToast={showToast}
+                                                    index={viewerSlidePage}
+                                                    onIndexChange={setViewerSlidePage}
                                                 />
                                             ) : (
                                                 <div className="text-center py-12 border border-dashed border-slate-700 rounded-xl my-auto p-4">
@@ -3322,6 +3350,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                     pageStart={slidePageStart}
                                                     pageEnd={slidePageEnd}
                                                     showToast={showToast}
+                                                    index={viewerSlidePage}
+                                                    onIndexChange={setViewerSlidePage}
                                                 />
                                             ) : (
                                                 <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-2xl p-6 text-center">
@@ -3716,6 +3746,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     progress={slideDeckProgress}
                                     hideLockBadge={true}
                                     showToast={showToast}
+                                    index={boardSlidePage}
+                                    onIndexChange={setBoardSlidePage}
                                 />
                             </div>
                         ) : slidePages.length > 0 ? (
@@ -3724,6 +3756,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     pages={slidePages}
                                     progress={slideDeckProgress}
                                     showToast={showToast}
+                                    index={boardSlidePage}
+                                    onIndexChange={setBoardSlidePage}
                                 />
                             </div>
                         ) : (
