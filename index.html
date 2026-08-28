@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.47.0)</title>
+    <title>研修ワークナビ AI (v1.48.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.47.0";
+        const APP_VERSION = "v1.48.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -935,7 +935,7 @@
                     broadcastDeckManifest();
                     setTimeout(broadcastDeckManifest, 2500);
                     setSlideDeckProgress(null);
-                    setShowSlideModal(false);
+                    // モーダルは閉じない。続けて公開範囲を調整できるようにする
                     showToast(`📄 ${first}〜${last}ページを配信しました（手元には全${result.total}Pを保持）`);
                 } catch (e) {
                     console.warn('PDF rasterize error:', e);
@@ -1388,7 +1388,6 @@
 
                 setSlideUrl(originalUrl);
                 slideUrlRef.current = originalUrl;
-                setShowSlideModal(false);
 
                 if (hasDeckNow) {
                     // 受講者へはPDF配信を続ける。URLは講師の投影専用なので送らないし、
@@ -4659,150 +4658,69 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     </button>
                                 </div>
 
-                                <div className="space-y-4 flex-1 min-h-0 overflow-y-auto -mr-2 pr-2">
-                                    {/* 資料の考え方 */}
-                                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-[10px] text-indigo-900 leading-relaxed">
-                                        <p className="font-bold text-[11px] mb-1 flex items-center gap-1.5">
-                                            <i className="fa-solid fa-circle-info text-indigo-600"></i>
-                                            講師と受講者で別の資料を使えます
-                                        </p>
-                                        <p>
-                                            <b>受講者へ配信されるのは、常に方式A（PDF画像）だけ</b>です。
-                                            方式BのURLは<b>講師の投影専用</b>で、受講者には渡りません。
-                                            両方を設定すると、投影画面で「PDF画像 / Googleスライド」を切り替えられます。
-                                        </p>
-                                    </div>
+                                <div className="space-y-3 flex-1 min-h-0 overflow-y-auto -mr-2 pr-2">
 
-                                    {/* ① 受講者に見せるページ範囲 */}
-                                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                                                <span className="bg-slate-800 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">1</span>
-                                                最初に公開するページ範囲
-                                            </label>
-                                            <span className="text-[10px] text-slate-500">
-                                                {slideInputPageEnd > 0 ? `${slideInputPageStart} 〜 ${slideInputPageEnd} ページのみ` : '全ページ'}
-                                            </span>
+                                    {/* ============ A: 受講者へ配信する資料 ============ */}
+                                    <div className="border-2 border-emerald-300 rounded-xl overflow-hidden">
+                                        <div className="bg-emerald-600 px-3 py-2">
+                                            <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                <i className="fa-solid fa-users"></i>
+                                                A. 受講者へ配信する資料（PDF）
+                                            </p>
+                                            <p className="text-[10px] text-emerald-50 mt-0.5">
+                                                {allSlidePages.length > 0
+                                                    ? `読み込み済み: ${slideDeckInfo ? slideDeckInfo.fileName : ''}（全${allSlidePages.length}ページ）`
+                                                    : 'PDFを選ぶと、指定した範囲だけが受講者に届きます'}
+                                            </p>
                                         </div>
 
-                                        <div className="flex items-center gap-2">
-                                            <div className="flex items-center gap-1 flex-1">
-                                                <span className="text-xs text-slate-600 font-medium">開始:</span>
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    value={slideInputPageStart}
-                                                    onChange={(e) => setSlideInputPageStart(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                                                    className="w-full border border-slate-300 rounded-lg p-1.5 text-xs text-center font-bold bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                                />
-                                                <span className="text-xs text-slate-500">P</span>
-                                            </div>
-                                            <span className="text-slate-400 font-bold">〜</span>
-                                            <div className="flex items-center gap-1 flex-1">
-                                                <span className="text-xs text-slate-600 font-medium">終了:</span>
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    value={slideInputPageEnd}
-                                                    onChange={(e) => setSlideInputPageEnd(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                                                    placeholder="0 (制限なし)"
-                                                    className="w-full border border-slate-300 rounded-lg p-1.5 text-xs text-center font-bold bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                                />
-                                                <span className="text-xs text-slate-500">P</span>
-                                            </div>
-                                        </div>
-
-                                        {/* クイック選択プリセットボタン */}
-                                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                                            <span className="text-[10px] text-slate-400 font-medium">プリセット:</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(0); }}
-                                                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageEnd === 0 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
-                                                全ページ
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(3); }}
-                                                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 1 && slideInputPageEnd === 3 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
-                                                1〜3P
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(5); }}
-                                                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 1 && slideInputPageEnd === 5 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
-                                                1〜5P
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setSlideInputPageStart(1); setSlideInputPageEnd(10); }}
-                                                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 1 && slideInputPageEnd === 10 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
-                                                1〜10P
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setSlideInputPageStart(6); setSlideInputPageEnd(10); }}
-                                                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${slideInputPageStart === 6 && slideInputPageEnd === 10 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
-                                                6〜10P
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* ② 方式A: PDFを読み込んで許可ページだけを配信（推奨） */}
-                                    <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-200 space-y-2">
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="bg-emerald-600 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">2</span>
-                                            <span className="text-xs font-bold text-emerald-900">方式A: 受講者へPDF画像を配信（制限が確実に効く）</span>
-                                        </div>
-                                        <p className="text-[10px] text-emerald-800 leading-relaxed">
-                                            Googleスライド / Googleドキュメントは <b>ファイル → ダウンロード → PDF</b> で書き出してから選んでください。
-                                            指定範囲のページだけを講師PC上で画像化して送るため、<b>受講者の端末には資料URLも範囲外ページも一切届きません。</b>
-                                        </p>
-                                        <p className="text-[10px] text-emerald-900 bg-white border border-emerald-200 rounded-lg p-2 leading-relaxed">
-                                            <i className="fa-solid fa-lock-open text-emerald-600 mr-1"></i>
-                                            答えが次ページにある場合は、<b>手前のページまで</b>を指定してください。
-                                            投影画面の「<b>次の1P公開</b>」ボタンで、答え合わせのタイミングに1ページずつ開放できます
-                                            （講師の投影には全ページが表示されます）。
-                                        </p>
-
-                                        <input
-                                            type="file"
-                                            accept="application/pdf,.pdf"
-                                            disabled={!!slideDeckProgress}
-                                            onChange={(e) => {
-                                                const f = e.target.files && e.target.files[0];
-                                                e.target.value = '';
-                                                handleLoadSlidePdf(f);
-                                            }}
-                                            className="w-full text-[11px] text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[11px] file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 file:cursor-pointer disabled:opacity-50"
-                                        />
-
-                                        {slideDeckProgress && (
-                                            <div className="bg-white rounded-lg border border-emerald-200 p-2 space-y-1">
-                                                <div className="flex items-center justify-between text-[10px] font-bold text-emerald-800">
-                                                    <span><i className="fa-solid fa-spinner fa-spin mr-1"></i>{slideDeckProgress.label}</span>
-                                                    <span className="font-mono">{slideDeckProgress.done} / {slideDeckProgress.total}</span>
-                                                </div>
-                                                <div className="h-1.5 bg-emerald-100 rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-emerald-500 transition-all"
-                                                        style={{ width: (slideDeckProgress.total > 0 ? Math.round((slideDeckProgress.done / slideDeckProgress.total) * 100) : 0) + '%' }}></div>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* 読み込み済みの資料は、再読み込みせず公開範囲だけ変えられる */}
-                                        {allSlidePages.length > 0 && !slideDeckProgress && (
-                                            <div className="bg-white rounded-lg border border-emerald-200 p-2 space-y-2">
-                                                <p className="text-[11px] font-bold text-emerald-900">
-                                                    <i className="fa-solid fa-sliders text-emerald-600 mr-1"></i>
-                                                    公開範囲をいま変更する（読み込み直し不要）
+                                        <div className="p-3 space-y-3 bg-emerald-50/60">
+                                            {/* A-1 PDFを選ぶ */}
+                                            <div className="bg-white rounded-lg border border-emerald-200 p-2.5 space-y-2">
+                                                <p className="text-[11px] font-bold text-slate-800">
+                                                    A-1. PDFを選ぶ
+                                                    <span className="ml-1 font-normal text-[10px] text-emerald-700">選んだ時点で配信されます</span>
                                                 </p>
+                                                <p className="text-[10px] text-slate-500 leading-relaxed">
+                                                    Googleスライド / ドキュメントは「ファイル → ダウンロード → PDF」で書き出してから選んでください。
+                                                </p>
+                                                <input
+                                                    type="file"
+                                                    accept="application/pdf,.pdf"
+                                                    disabled={!!slideDeckProgress}
+                                                    onChange={(e) => {
+                                                        const f = e.target.files && e.target.files[0];
+                                                        e.target.value = '';
+                                                        handleLoadSlidePdf(f);
+                                                    }}
+                                                    className="w-full text-[11px] text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[11px] file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 file:cursor-pointer disabled:opacity-50"
+                                                />
+
+                                                {slideDeckProgress && (
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center justify-between text-[10px] font-bold text-emerald-800">
+                                                            <span><i className="fa-solid fa-spinner fa-spin mr-1"></i>{slideDeckProgress.label}</span>
+                                                            <span className="font-mono">{slideDeckProgress.done} / {slideDeckProgress.total}</span>
+                                                        </div>
+                                                        <div className="h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-emerald-500 transition-all"
+                                                                style={{ width: (slideDeckProgress.total > 0 ? Math.round((slideDeckProgress.done / slideDeckProgress.total) * 100) : 0) + '%' }}></div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* A-2 公開範囲 */}
+                                            <div className="bg-white rounded-lg border border-emerald-200 p-2.5 space-y-2">
+                                                <p className="text-[11px] font-bold text-slate-800">
+                                                    A-2. 受講者に見せるページ範囲
+                                                </p>
+
                                                 <div className="flex items-center gap-1.5">
                                                     <input
                                                         type="number"
                                                         min="1"
-                                                        max={allSlidePages.length}
                                                         value={slideInputPageStart}
                                                         onChange={(e) => setSlideInputPageStart(Math.max(1, parseInt(e.target.value, 10) || 1))}
                                                         className="w-16 border border-slate-300 rounded-lg p-1.5 text-xs text-center font-bold bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
@@ -4811,24 +4729,43 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                     <input
                                                         type="number"
                                                         min="1"
-                                                        max={allSlidePages.length}
                                                         value={slideInputPageEnd}
                                                         onChange={(e) => setSlideInputPageEnd(Math.max(1, parseInt(e.target.value, 10) || 1))}
                                                         className="w-16 border border-slate-300 rounded-lg p-1.5 text-xs text-center font-bold bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                                                     />
-                                                    <span className="text-[10px] text-slate-500 shrink-0">/ 全{allSlidePages.length}P</span>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            applyPublishRange(slideInputPageStart, slideInputPageEnd);
-                                                            showToast(`📄 公開範囲を ${slideInputPageStart}〜${slideInputPageEnd}P に変更しました`);
-                                                        }}
-                                                        className="ml-auto shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition">
-                                                        適用
-                                                    </button>
+                                                    <span className="text-[10px] text-slate-500 shrink-0">ページ</span>
+                                                    {allSlidePages.length > 0 && (
+                                                        <span className="text-[10px] text-slate-400 shrink-0">/ 全{allSlidePages.length}P</span>
+                                                    )}
                                                 </div>
 
-                                                {/* 一度に配る枚数の目安。1ページおよそ100KBで、多いほど配信に時間がかかる */}
+                                                {allSlidePages.length > 0 ? (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                applyPublishRange(slideInputPageStart, slideInputPageEnd);
+                                                                showToast(`📄 公開範囲を ${slideInputPageStart}〜${slideInputPageEnd}P に変更しました`);
+                                                            }}
+                                                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold py-2 rounded-lg transition flex items-center justify-center gap-1.5">
+                                                            <i className="fa-solid fa-check text-[10px]"></i>
+                                                            この範囲で公開する
+                                                        </button>
+                                                        <p className="text-[10px] text-slate-500 text-center">
+                                                            いま公開中:
+                                                            <b className="text-emerald-700 ml-1">
+                                                                {slidePages.length > 0
+                                                                    ? `${slidePages[0].page} 〜 ${slidePages[slidePages.length - 1].page} ページ`
+                                                                    : 'なし'}
+                                                            </b>
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <p className="text-[10px] text-slate-500">
+                                                        ここで指定した範囲が、A-1でPDFを選んだときに配信されます。
+                                                    </p>
+                                                )}
+
                                                 {(() => {
                                                     const count = Math.max(0, slideInputPageEnd - slideInputPageStart + 1);
                                                     if (count <= 0) return null;
@@ -4839,99 +4776,91 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             {heavy && <i className="fa-solid fa-triangle-exclamation mr-1"></i>}
                                                             この範囲は <b>{count}ページ</b>（受講者1人あたり約{mb}MB）。
                                                             {heavy
-                                                                ? ' 一度に配るには多く、配信に時間がかかります。進行に合わせて範囲を広げる使い方を推奨します。'
+                                                                ? ' 一度に配るには多く、配信に時間がかかります。進行に合わせて広げる使い方を推奨します。'
                                                                 : ' 快適に配信できる範囲です。'}
                                                         </p>
                                                     );
                                                 })()}
-                                            </div>
-                                        )}
 
-                                        {slideDeckInfo && slidePages.length > 0 && !slideDeckProgress && (
-                                            <div className="bg-white rounded-lg border border-emerald-200 p-2 flex items-center justify-between gap-2">
-                                                <div className="min-w-0">
-                                                    <p className="text-[11px] font-bold text-emerald-900 truncate">
-                                                        <i className="fa-solid fa-circle-check text-emerald-600 mr-1"></i>
-                                                        配信中: {slideDeckInfo.fileName}
-                                                    </p>
-                                                    <p className="text-[10px] text-slate-500 font-mono">
-                                                        {slideDeckInfo.first}〜{slideDeckInfo.last}P（全{slideDeckInfo.total}P中 / {slidePages.length}枚）
-                                                    </p>
-                                                </div>
+                                                <p className="text-[10px] text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-lg p-2 leading-relaxed">
+                                                    <i className="fa-solid fa-lock-open text-emerald-600 mr-1"></i>
+                                                    答えが次ページにある場合は<b>手前のページまで</b>を指定し、投影画面の「次の1P公開」で開放してください。
+                                                </p>
+                                            </div>
+
+                                            {/* A-3 解除 */}
+                                            {allSlidePages.length > 0 && !slideDeckProgress && (
                                                 <button
                                                     type="button"
                                                     onClick={handleClearSlideDeck}
-                                                    className="shrink-0 text-[10px] font-bold text-rose-600 hover:text-rose-800 border border-rose-200 hover:bg-rose-50 rounded-lg px-2 py-1 transition">
-                                                    配信を解除
+                                                    className="w-full text-[11px] font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-300 rounded-lg py-2 transition flex items-center justify-center gap-1.5">
+                                                    <i className="fa-solid fa-trash-can text-[10px]"></i>
+                                                    受講者への配信をやめる
                                                 </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* ============ B: 講師の投影用URL ============ */}
+                                    <div className="border-2 border-slate-300 rounded-xl overflow-hidden">
+                                        <div className="bg-slate-600 px-3 py-2">
+                                            <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                <i className="fa-solid fa-desktop"></i>
+                                                B. 講師の投影用URL（任意）
+                                            </p>
+                                            <p className="text-[10px] text-slate-200 mt-0.5">
+                                                {allSlidePages.length > 0
+                                                    ? 'Googleスライドをそのまま投影できます。受講者には届きません'
+                                                    : 'Aが未設定のときは、このURLが受講者にも共有されます'}
+                                            </p>
+                                        </div>
+
+                                        <div className="p-3 space-y-2 bg-slate-50/60">
+                                            <div className="bg-white rounded-lg border border-slate-200 p-2.5 space-y-2">
+                                                <input
+                                                    type="url"
+                                                    value={slideInputUrl}
+                                                    onChange={(e) => setSlideInputUrl(e.target.value)}
+                                                    placeholder="https://docs.google.com/presentation/d/.../edit"
+                                                    className="w-full border border-slate-300 rounded-lg p-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSaveSlideUrl(slideInputUrl, slideInputPageStart, slideInputPageEnd)}
+                                                    className="w-full bg-slate-700 hover:bg-slate-800 text-white text-[11px] font-bold py-2 rounded-lg transition flex items-center justify-center gap-1.5">
+                                                    <i className="fa-solid fa-check text-[10px]"></i>
+                                                    このURLを設定する
+                                                </button>
+                                                {slideUrl && (
+                                                    <p className="text-[10px] text-slate-500 text-center truncate">
+                                                        設定中: <b className="text-slate-700">{slideUrl}</b>
+                                                    </p>
+                                                )}
                                             </div>
-                                        )}
-                                    </div>
 
-                                    {/* ③ 方式B: URLをそのまま共有（制限なし） */}
-                                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="bg-slate-400 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-black">3</span>
-                                            <span className="text-xs font-bold text-slate-700">
-                                                方式B: {allSlidePages.length > 0 ? '講師の投影用URL（受講者には渡りません）' : 'URLをそのまま共有（全ページ閲覧可）'}
-                                            </span>
-                                        </div>
-                                        {allSlidePages.length > 0 ? (
-                                            <p className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2 leading-relaxed">
-                                                <i className="fa-solid fa-shield-halved mr-1"></i>
-                                                方式Aで配信中のため、ここに入れたURLは<b>講師の投影にだけ</b>使われます。
-                                                Googleスライドをそのまま投影できるので、アニメーションや動画もそのまま動きます。
-                                                <b>受講者にはURLも範囲外ページも届きません。</b>
+                                            {slideUrl && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSaveSlideUrl('', 1, 0)}
+                                                    className="w-full text-[11px] font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-300 rounded-lg py-2 transition flex items-center justify-center gap-1.5">
+                                                    <i className="fa-solid fa-trash-can text-[10px]"></i>
+                                                    投影用URLを解除する
+                                                </button>
+                                            )}
+
+                                            <p className="text-[10px] text-slate-600 bg-slate-100 border border-slate-200 rounded-lg p-2 leading-relaxed">
+                                                <i className="fa-solid fa-circle-exclamation text-slate-500 mr-1"></i>
+                                                Gemini・ChatGPT・Google検索などは<b>サイト側が埋め込みを拒否</b>します。
+                                                こうしたサイトはヘッダーの<b>「リンク共有」</b>から配ってください。
                                             </p>
-                                        ) : (
-                                            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed">
-                                                <i className="fa-solid fa-triangle-exclamation mr-1"></i>
-                                                方式AのPDFが未設定のため、このURLは<b>受講者にもそのまま渡ります</b>（＝ページ制限は効きません）。
-                                                制限が必要なら、先に方式AでPDFを読み込んでください。
-                                            </p>
-                                        )}
-                                        <input
-                                            type="url"
-                                            value={slideInputUrl}
-                                            onChange={(e) => setSlideInputUrl(e.target.value)}
-                                            placeholder="https://docs.google.com/presentation/d/.../edit"
-                                            className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                        />
-                                        <p className="text-[10px] text-slate-400">
-                                            対応: Googleスライド / Googleドライブ上のPDF / その他のWeb公開資料URL
-                                        </p>
-                                        <p className="text-[10px] text-slate-600 bg-slate-100 border border-slate-200 rounded-lg p-2 leading-relaxed">
-                                            <i className="fa-solid fa-circle-exclamation text-slate-500 mr-1"></i>
-                                            Gemini・ChatGPT・Google検索などは<b>サイト側が埋め込みを拒否</b>するため、ここに入れても
-                                            「接続が拒否されました」と表示されます。こうしたサイトはヘッダーの
-                                            <b>「リンク共有」</b>から配ってください。
-                                        </p>
-                                    </div>
-
-                                    <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
-                                        <div className="flex items-center gap-2">
-                                            <button 
-                                                onClick={() => setShowSlideModal(false)}
-                                                className="flex-1 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition">
-                                                キャンセル
-                                            </button>
-                                            <button 
-                                                onClick={() => handleSaveSlideUrl(slideInputUrl, slideInputPageStart, slideInputPageEnd)}
-                                                className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow transition flex items-center justify-center gap-1.5 cursor-pointer">
-                                                <i className="fa-solid fa-check"></i>
-                                                {allSlidePages.length > 0 ? '投影用URLを保存' : 'URLを保存して共有'}
-                                            </button>
                                         </div>
-
-                                        {slideUrl && (
-                                            <button 
-                                                onClick={() => handleSaveSlideUrl('', 1, 0)}
-                                                className="text-[11px] text-rose-500 hover:text-rose-700 py-1 transition flex items-center justify-center gap-1 cursor-pointer">
-                                                <i className="fa-solid fa-trash-can text-[10px]"></i>
-                                                {allSlidePages.length > 0 ? '投影用URLを解除' : 'スライドの登録を解除'}
-                                            </button>
-                                        )}
                                     </div>
+
+                                    <button
+                                        onClick={() => setShowSlideModal(false)}
+                                        className="w-full py-2.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                                        閉じる
+                                    </button>
                                 </div>
                             </div>
                         </div>
