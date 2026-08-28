@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.43.0)</title>
+    <title>研修ワークナビ AI (v1.44.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.43.0";
+        const APP_VERSION = "v1.44.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -736,6 +736,22 @@
                 localStorage.setItem('bansho_screen_interval', String(screenIntervalMs));
             }, [screenIntervalMs]);
 
+            // よく使うリンクの事前登録（講師の端末に保存）
+            const [savedLinks, setSavedLinks] = useState(() => {
+                if (isParticipantOnly) return [];
+                try {
+                    const raw = JSON.parse(localStorage.getItem('bansho_saved_links') || '[]');
+                    return Array.isArray(raw) ? raw : [];
+                } catch (e) {
+                    return [];
+                }
+            });
+            useEffect(() => {
+                if (!isParticipantOnly) {
+                    localStorage.setItem('bansho_saved_links', JSON.stringify(savedLinks));
+                }
+            }, [savedLinks]);
+
             const [showLinkModal, setShowLinkModal] = useState(false);
             const [linkInputUrl, setLinkInputUrl] = useState('');
             const [linkInputLabel, setLinkInputLabel] = useState('');
@@ -1278,6 +1294,43 @@
                 showToast('🔗 リンクを受講者に配りました');
             };
 
+            // 受講者が一瞬でも切れていると QoS0 のメッセージは届かず、
+            // 接続が生きているため再同期も起きない（解除したリンクが残り続ける等）。
+            // 20秒ごとに軽い状態を配り直して、取りこぼしても自動で揃うようにする。
+            useEffect(() => {
+                if (appRole !== 'board') return;
+                const timer = setInterval(() => {
+                    broadcastToClients({
+                        type: 'SYNC_SMALL_STATE',
+                        sharedLink: sharedLinkRef.current,
+                        isLocked: isSubmissionsLockedRef.current,
+                        screenSharing: !!screenTickRef.current
+                    });
+                }, 20000);
+                return () => clearInterval(timer);
+            }, [appRole]);
+
+            // 入力中の内容をよく使うリンクとして登録する
+            const handleAddSavedLink = () => {
+                const input = (linkInputUrl || '').trim();
+                if (!input) {
+                    showToast('⚠️ URLを入力してください');
+                    return;
+                }
+                const url = /^https?:\/\//i.test(input) ? input : 'https://' + input;
+                const label = (linkInputLabel || '').trim();
+                if (savedLinks.some(l => l.url === url)) {
+                    showToast('ℹ️ 同じURLが既に登録されています');
+                    return;
+                }
+                setSavedLinks(prev => [...prev, { id: 'lnk-' + Date.now(), url, label }]);
+                showToast('⭐ よく使うリンクに登録しました');
+            };
+
+            const handleDeleteSavedLink = (id) => {
+                setSavedLinks(prev => prev.filter(l => l.id !== id));
+            };
+
             const handleClearSharedLink = () => {
                 setSharedLink(null);
                 sharedLinkRef.current = null;
@@ -1662,6 +1715,17 @@
                                         return null;
                                     });
                                     setParticipantTab(prev => prev === 'screen' ? 'post' : prev);
+                                } else if (data.type === 'SYNC_SMALL_STATE') {
+                                    // 取りこぼし復旧用。届いた内容で現在の状態を上書きする
+                                    setSharedLink(data.sharedLink || null);
+                                    if (typeof data.isLocked === 'boolean') setIsSubmissionsLocked(data.isLocked);
+                                    if (data.screenSharing === false) {
+                                        setIsScreenSharing(false);
+                                        setScreenFrame(prev => {
+                                            if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                                            return null;
+                                        });
+                                    }
                                 } else if (data.type === 'SYNC_SHARED_LINK') {
                                     setSharedLink(data.link || null);
                                     if (data.link) {
@@ -4356,6 +4420,45 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         こちらでリンクとして配ってください。
                                     </p>
 
+                                    {/* ⭐ 事前登録したリンク */}
+                                    {savedLinks.length > 0 && (
+                                        <div className="space-y-1.5">
+                                            <p className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                                <i className="fa-solid fa-star text-amber-500 text-[11px]"></i>
+                                                よく使うリンク
+                                                <span className="text-[10px] font-normal text-slate-400">タップして配る</span>
+                                            </p>
+                                            <div className="space-y-1">
+                                                {savedLinks.map(l => (
+                                                    <div key={l.id} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleShareLink(l.url, l.label)}
+                                                            className="flex-1 min-w-0 text-left px-1.5 py-1 rounded hover:bg-white transition">
+                                                            <p className="text-[11px] font-bold text-slate-800 truncate">
+                                                                {l.label || l.url}
+                                                            </p>
+                                                            {l.label && <p className="text-[10px] text-slate-400 font-mono truncate">{l.url}</p>}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleShareLink(l.url, l.label)}
+                                                            className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2 py-1.5 rounded-lg transition">
+                                                            配る
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteSavedLink(l.id)}
+                                                            title="登録を削除"
+                                                            className="shrink-0 text-slate-400 hover:text-rose-500 px-1 py-1 transition">
+                                                            <i className="fa-solid fa-xmark text-xs"></i>
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div>
                                         <label className="block text-xs font-bold text-slate-700 mb-1.5">URL</label>
                                         <input
@@ -4383,6 +4486,14 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             className="w-full border border-slate-300 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                                         />
                                     </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={handleAddSavedLink}
+                                        className="w-full py-1.5 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition flex items-center justify-center gap-1.5">
+                                        <i className="fa-solid fa-star text-[10px]"></i>
+                                        いまの内容を「よく使うリンク」に登録
+                                    </button>
 
                                     {/* 投影して読み取ってもらう用のQR */}
                                     {sharedLink && sharedLink.url && (
