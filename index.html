@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.48.0)</title>
+    <title>研修ワークナビ AI (v1.49.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.48.0";
+        const APP_VERSION = "v1.49.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -2069,7 +2069,16 @@
                     categories: [...categories],
                     summaries: { ...summaries },
                     cardCount: cards.length,
-                    totalVotes: cards.reduce((sum, c) => sum + (c.votes || 0), 0)
+                    totalVotes: cards.reduce((sum, c) => sum + (c.votes || 0), 0),
+                    // 進行に使った設定も残す。スライド画像自体は容量が大きいため含めない
+                    // （復元時はPDFを選び直すが、公開範囲やURLはそのまま戻る）
+                    settings: {
+                        pageStart: slidePageStart,
+                        pageEnd: slidePageEnd,
+                        slideUrl: slideUrl || '',
+                        pdfFileName: slideDeckInfo ? slideDeckInfo.fileName : '',
+                        sharedLink: sharedLink || null
+                    }
                 };
 
                 setArchives(prev => [newArchive, ...prev]);
@@ -2099,7 +2108,16 @@
                     categories: [...categories],
                     summaries: { ...summaries },
                     cardCount: cards.length,
-                    totalVotes: cards.reduce((sum, c) => sum + (c.votes || 0), 0)
+                    totalVotes: cards.reduce((sum, c) => sum + (c.votes || 0), 0),
+                    // 進行に使った設定も残す。スライド画像自体は容量が大きいため含めない
+                    // （復元時はPDFを選び直すが、公開範囲やURLはそのまま戻る）
+                    settings: {
+                        pageStart: slidePageStart,
+                        pageEnd: slidePageEnd,
+                        slideUrl: slideUrl || '',
+                        pdfFileName: slideDeckInfo ? slideDeckInfo.fileName : '',
+                        sharedLink: sharedLink || null
+                    }
                 };
 
                 setArchives(prev => [newArchive, ...prev]);
@@ -2141,6 +2159,41 @@
                 localStorage.setItem('bansho_session_title', restoredTitle);
                 localStorage.setItem('bansho_cards', JSON.stringify(restoredCards));
                 localStorage.setItem('bansho_categories', JSON.stringify(restoredCategories));
+
+                // 進行設定の復元（スライド画像は含まれないのでPDFは選び直し）
+                const st = archive.settings;
+                if (st) {
+                    const ps = Math.max(1, parseInt(st.pageStart, 10) || 1);
+                    const pe = Math.max(0, parseInt(st.pageEnd, 10) || 0);
+                    setSlideInputPageStart(ps);
+                    setSlideInputPageEnd(pe > 0 ? pe : ps);
+
+                    if ((allSlidePagesRef.current || []).length > 0 && pe > 0) {
+                        // 資料が読み込まれていれば、その場で公開範囲を戻す
+                        applyPublishRange(ps, pe);
+                    } else {
+                        setSlidePageStart(ps);
+                        setSlidePageEnd(pe);
+                    }
+
+                    setSlideUrl(st.slideUrl || '');
+                    slideUrlRef.current = st.slideUrl || '';
+                    setSlideInputUrl(st.slideUrl || '');
+
+                    setSharedLink(st.sharedLink || null);
+                    sharedLinkRef.current = st.sharedLink || null;
+                    broadcastToClients({ type: 'SYNC_SHARED_LINK', link: st.sharedLink || null });
+
+                    // 受講者へURLを共有するのは、PDF配信をしていない場合だけ
+                    if ((allSlidePagesRef.current || []).length === 0) {
+                        broadcastToClients({
+                            type: 'SYNC_SLIDE_URL',
+                            slideUrl: st.slideUrl || '',
+                            pageStart: ps,
+                            pageEnd: pe
+                        });
+                    }
+                }
 
                 setShowArchiveModal(false);
                 broadcastToClients({ type: 'SYNC_THEME', themeTitle: restoredTitle });
@@ -4463,6 +4516,15 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                         {arch.summaries && Object.keys(arch.summaries).length > 0 && (
                                                             <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded font-bold">
                                                                 💡 AI要約あり
+                                                            </span>
+                                                        )}
+                                                        {/* 一緒に保存された進行設定（スライド画像は含まれない） */}
+                                                        {arch.settings && (arch.settings.pageEnd > 0 || arch.settings.slideUrl || arch.settings.sharedLink) && (
+                                                            <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded font-bold">
+                                                                ⚙️ 設定あり
+                                                                {arch.settings.pageEnd > 0 && ` 範囲${arch.settings.pageStart}〜${arch.settings.pageEnd}P`}
+                                                                {arch.settings.slideUrl && ' / 投影URL'}
+                                                                {arch.settings.sharedLink && ' / リンク'}
                                                             </span>
                                                         )}
                                                     </div>
