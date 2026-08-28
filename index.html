@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.50.0)</title>
+    <title>研修ワークナビ AI (v1.51.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.50.0";
+        const APP_VERSION = "v1.51.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -523,6 +523,75 @@
             { id: 'c-4', text: 'AIが要約まで作ってくれるとレポート作成が楽になる', color: 'sticky-green', categoryId: null, votes: 3, author: '受講者D', createdAt: '16:18' }
         ];
 
+        // ============================================================
+        // 📽️ 投影専用ウィンドウ（?role=projector）
+        //   パワポの発表者ツールと同じ考え方。このウィンドウを外部モニターへ移して
+        //   全画面にすると、講師の手元には次ページ付きの発表者ビューが残る。
+        //   画像はIndexedDBから直接読むので、表示するページ番号だけを受け取る。
+        // ============================================================
+        const PROJECTOR_CHANNEL = 'bansho_projector';
+
+        function ProjectorView() {
+            const [pages, setPages] = useState([]);
+            const [pageNo, setPageNo] = useState(null);
+            const [ready, setReady] = useState(false);
+
+            // デッキを読み込む（講師ウィンドウと同じIndexedDBを共有）
+            const loadDeck = async () => {
+                try {
+                    const saved = await deckDbGet();
+                    setPages(saved && saved.pages ? saved.pages : []);
+                } catch (e) {
+                    setPages([]);
+                }
+                setReady(true);
+            };
+
+            useEffect(() => { loadDeck(); }, []);
+
+            useEffect(() => {
+                let ch = null;
+                try {
+                    ch = new BroadcastChannel(PROJECTOR_CHANNEL);
+                    ch.onmessage = (e) => {
+                        const d = e.data || {};
+                        if (d.type === 'SHOW_PAGE') setPageNo(d.page);
+                        else if (d.type === 'DECK_UPDATED') loadDeck();
+                    };
+                    ch.postMessage({ type: 'PROJECTOR_READY' });
+                } catch (e) {
+                    console.warn('BroadcastChannel unavailable:', e);
+                }
+                return () => { if (ch) try { ch.close(); } catch (e2) {} };
+            }, []);
+
+            const current = pages.find(p => p.page === pageNo);
+
+            return (
+                <div className="w-full h-full bg-black flex items-center justify-center select-none">
+                    {current ? (
+                        <img
+                            src={current.dataUrl}
+                            alt={`スライド ${current.page} ページ`}
+                            draggable={false}
+                            onContextMenu={(e) => e.preventDefault()}
+                            className="max-w-full max-h-full object-contain"
+                        />
+                    ) : (
+                        <div className="text-center text-slate-500 p-8">
+                            <i className="fa-solid fa-display text-5xl mb-4"></i>
+                            <p className="text-sm font-bold text-slate-300">投影ウィンドウ</p>
+                            <p className="text-xs mt-2">
+                                {ready
+                                    ? 'このウィンドウを投影用モニターへ移動し、F11 で全画面にしてください'
+                                    : '資料を読み込んでいます…'}
+                            </p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         function App() {
             const urlParams = new URLSearchParams(window.location.search);
             const isParticipantOnly = urlParams.get('role') === 'participant';
@@ -756,8 +825,43 @@
             const [linkInputUrl, setLinkInputUrl] = useState('');
             const [linkInputLabel, setLinkInputLabel] = useState('');
 
+            // 投影ウィンドウ（別ウィンドウ）との連携用チャンネル
+            const projectorChRef = useRef(null);
+            const [projectorOpen, setProjectorOpen] = useState(false);
+
+            useEffect(() => {
+                if (appRole !== 'board') return;
+                let ch = null;
+                try {
+                    ch = new BroadcastChannel(PROJECTOR_CHANNEL);
+                    projectorChRef.current = ch;
+                    ch.onmessage = (e) => {
+                        // 投影ウィンドウが開いたら、いまのページを送り返す
+                        if (e.data && e.data.type === 'PROJECTOR_READY') {
+                            setProjectorOpen(true);
+                            const pub = slidePagesRef.current || [];
+                            const cur = pub[Math.min(boardSlidePageRef.current, Math.max(0, pub.length - 1))];
+                            if (cur) ch.postMessage({ type: 'SHOW_PAGE', page: cur.page });
+                        }
+                    };
+                } catch (e) {
+                    console.warn('BroadcastChannel unavailable:', e);
+                }
+                return () => { if (ch) { try { ch.close(); } catch (e2) {} } projectorChRef.current = null; };
+            }, [appRole]);
+
             // スライドの表示中ページ。ビューアーが作り直されても位置を保つために親で持つ。
             const [boardSlidePage, setBoardSlidePage] = useState(0);      // 講師の投影ビュー用
+            const boardSlidePageRef = useRef(0);
+
+            // 表示中ページが変わるたびに投影ウィンドウへ通知する
+            useEffect(() => {
+                boardSlidePageRef.current = boardSlidePage;
+                if (appRole !== 'board' || !projectorChRef.current) return;
+                const pub = slidePagesRef.current || [];
+                const cur = pub[Math.min(boardSlidePage, Math.max(0, pub.length - 1))];
+                if (cur) projectorChRef.current.postMessage({ type: 'SHOW_PAGE', page: cur.page });
+            }, [boardSlidePage, slidePages, appRole]);
             const [viewerSlidePage, setViewerSlidePage] = useState(0);    // 受講者ビュー用
 
             // 受講者スマホの色選択を開いているか（畳んでいる間は1行しか使わない）
@@ -924,7 +1028,9 @@
                     setSlidePageEnd(last);
                     setSlideInputPageStart(first);
                     setSlideInputPageEnd(last);
-                    deckDbPut({ pages: all, info }).catch(() => {});
+                    deckDbPut({ pages: all, info })
+                        .then(() => { if (projectorChRef.current) projectorChRef.current.postMessage({ type: 'DECK_UPDATED' }); })
+                        .catch(() => {});
 
                     // 受講者へ渡すのは常にデッキだけ。講師の投影用URLは残したまま共有しない
                     broadcastToClients({ type: 'SYNC_SLIDE_URL', slideUrl: '', pageStart: first, pageEnd: last });
@@ -967,7 +1073,9 @@
                 const info = { ...(slideDeckInfoRef.current || {}), first, last };
                 setSlideDeckInfo(info);
                 slideDeckInfoRef.current = info;
-                deckDbPut({ pages: all, info }).catch(() => {});
+                deckDbPut({ pages: all, info })
+                        .then(() => { if (projectorChRef.current) projectorChRef.current.postMessage({ type: 'DECK_UPDATED' }); })
+                        .catch(() => {});
 
                 broadcastToClients({ type: 'SYNC_SLIDE_URL', slideUrl: '', pageStart: first, pageEnd: last });
 
@@ -3943,6 +4051,23 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     </button>
                                 </div>
                             )}
+                            {allSlidePages.length > 0 && (
+                                <button
+                                    onClick={() => {
+                                        const w = window.open(
+                                            `${window.location.pathname}?role=projector`,
+                                            'bansho_projector',
+                                            'width=1280,height=720'
+                                        );
+                                        if (!w) showToast('⚠️ ポップアップがブロックされました。許可してください');
+                                        else showToast('📽️ 投影ウィンドウを開きました。投影用モニターへ移動してF11で全画面に');
+                                    }}
+                                    title="投影用の別ウィンドウを開く（外部モニターへ移動して全画面にしてください）"
+                                    className={`px-2.5 py-1 rounded transition flex items-center gap-1 font-medium ${projectorOpen ? 'bg-emerald-700 text-white hover:bg-emerald-600' : 'text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700'}`}>
+                                    <i className="fa-solid fa-display"></i>
+                                    {projectorOpen ? '投影中' : '投影ウィンドウ'}
+                                </button>
+                            )}
                             <button
                                 onClick={() => {
                                     setSlideInputUrl(slideUrl);
@@ -3968,17 +4093,58 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 frameBorder="0"
                             ></iframe>
                         ) : slidePages.length > 0 ? (
-                            <div className="w-full h-full flex">
+                            <div className="w-full h-full flex gap-2 min-h-0">
                                 {/* 投影は室内に映るため、受講者へ公開中のページだけを表示する。
                                     未公開の答えページが投影に出てしまうのを防ぐ。 */}
-                                <RestrictedSlideViewer
-                                    pages={slidePages}
-                                    progress={slideDeckProgress}
-                                    hideLockBadge={true}
-                                    showToast={showToast}
-                                    index={boardSlidePage}
-                                    onIndexChange={setBoardSlidePage}
-                                />
+                                <div className="flex-1 flex min-w-0">
+                                    <RestrictedSlideViewer
+                                        pages={slidePages}
+                                        progress={slideDeckProgress}
+                                        hideLockBadge={true}
+                                        showToast={showToast}
+                                        index={boardSlidePage}
+                                        onIndexChange={setBoardSlidePage}
+                                    />
+                                </div>
+
+                                {/* 📋 発表者ビュー: 次のページを手元だけで先読みする（未公開でも表示） */}
+                                {(() => {
+                                    const cur = slidePages[Math.min(boardSlidePage, Math.max(0, slidePages.length - 1))];
+                                    if (!cur) return null;
+                                    const nextInDeck = allSlidePages.find(p => p.page === cur.page + 1);
+                                    const isPublished = !!slidePages.find(p => p.page === cur.page + 1);
+                                    return (
+                                        <div className="w-56 xl:w-64 shrink-0 hidden lg:flex flex-col gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2">
+                                            <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5">
+                                                <i className="fa-solid fa-eye text-slate-500"></i>
+                                                次のページ（手元のみ）
+                                            </p>
+                                            <div className="flex-1 min-h-0 flex items-center justify-center bg-black rounded-lg overflow-hidden">
+                                                {nextInDeck ? (
+                                                    <img
+                                                        src={nextInDeck.dataUrl}
+                                                        alt={`次のページ ${nextInDeck.page}`}
+                                                        draggable={false}
+                                                        className="max-w-full max-h-full object-contain"
+                                                    />
+                                                ) : (
+                                                    <p className="text-[10px] text-slate-600 p-3 text-center">最終ページです</p>
+                                                )}
+                                            </div>
+                                            {nextInDeck && (
+                                                <div className="flex items-center justify-between text-[10px]">
+                                                    <span className="font-mono text-slate-400">{nextInDeck.page} ページ</span>
+                                                    <span className={`px-1.5 py-0.5 rounded font-bold ${isPublished ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                                                        {isPublished ? '公開済み' : '未公開'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <p className="text-[9px] text-slate-500 leading-snug">
+                                                この欄は投影ウィンドウには映りません
+                                            </p>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         ) : allSlidePages.length > 0 ? (
                             <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 p-8">
@@ -5447,7 +5613,10 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
             );
         }
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        const rootRole = new URLSearchParams(window.location.search).get('role');
+        ReactDOM.createRoot(document.getElementById('root')).render(
+            rootRole === 'projector' ? <ProjectorView /> : <App />
+        );
     </script>
 </body>
 </html>
