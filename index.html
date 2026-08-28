@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.46.0)</title>
+    <title>研修ワークナビ AI (v1.47.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.46.0";
+        const APP_VERSION = "v1.47.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -819,7 +819,20 @@
             const [timerTotal, setTimerTotal] = useState(0);     // 設定総秒数
             const [isTimerRunning, setIsTimerRunning] = useState(false);
             const [isTimeUp, setIsTimeUp] = useState(false);
-            const [isSubmissionsLocked, setIsSubmissionsLocked] = useState(false); // 投稿受付ロック
+            // 投稿受付ロック。初期値は「受付停止中」。
+            //   講師が開始の合図を出してから受け付ける運用に合わせる。
+            //   ただし講師が一度切り替えた状態は保存し、研修中に再読み込みしても
+            //   勝手に受付が閉じないようにする。
+            const [isSubmissionsLocked, setIsSubmissionsLocked] = useState(() => {
+                if (isParticipantOnly) return true; // 同期が届くまでは閉じておく
+                const saved = localStorage.getItem('bansho_submissions_locked');
+                return saved === null ? true : saved === 'true';
+            });
+            useEffect(() => {
+                if (!isParticipantOnly) {
+                    localStorage.setItem('bansho_submissions_locked', String(isSubmissionsLocked));
+                }
+            }, [isSubmissionsLocked]);
 
             const peerRef = useRef(null);
             const connRef = useRef(null);
@@ -4814,6 +4827,23 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                         適用
                                                     </button>
                                                 </div>
+
+                                                {/* 一度に配る枚数の目安。1ページおよそ100KBで、多いほど配信に時間がかかる */}
+                                                {(() => {
+                                                    const count = Math.max(0, slideInputPageEnd - slideInputPageStart + 1);
+                                                    if (count <= 0) return null;
+                                                    const mb = (count * 0.1).toFixed(1);
+                                                    const heavy = count > 20;
+                                                    return (
+                                                        <p className={`text-[10px] leading-relaxed rounded-lg p-2 border ${heavy ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                                                            {heavy && <i className="fa-solid fa-triangle-exclamation mr-1"></i>}
+                                                            この範囲は <b>{count}ページ</b>（受講者1人あたり約{mb}MB）。
+                                                            {heavy
+                                                                ? ' 一度に配るには多く、配信に時間がかかります。進行に合わせて範囲を広げる使い方を推奨します。'
+                                                                : ' 快適に配信できる範囲です。'}
+                                                        </p>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
 
