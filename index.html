@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.42.0)</title>
+    <title>研修ワークナビ AI (v1.43.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.42.0";
+        const APP_VERSION = "v1.43.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -3092,7 +3092,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                                         type="text"
                                                                         value={participantName}
                                                                         onChange={(e) => handleParticipantNameChange(e.target.value)}
-                                                                        placeholder="お名前 / 班"
+                                                                        placeholder="お名前"
                                                                         className="w-full h-11 bg-slate-900 border border-slate-600 rounded-lg pl-8 pr-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                                                     />
                                                                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-base pointer-events-none">
@@ -3442,13 +3442,13 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         </div>
 
                                         <div className="flex items-center gap-2">
-                                            <span className="text-[11px] font-bold text-slate-300 shrink-0">お名前/班:</span>
+                                            <span className="text-[11px] font-bold text-slate-300 shrink-0">お名前:</span>
                                             <div className="relative flex-1">
                                                 <input 
                                                     type="text"
                                                     value={participantName}
                                                     onChange={(e) => handleParticipantNameChange(e.target.value)}
-                                                    placeholder="例: 山田 / A班"
+                                                    placeholder="お名前"
                                                     className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 pl-6"
                                                 />
                                                 <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs">
