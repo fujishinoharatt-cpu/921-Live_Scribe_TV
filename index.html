@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.49.0)</title>
+    <title>研修ワークナビ AI (v1.50.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.49.0";
+        const APP_VERSION = "v1.50.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -1011,6 +1011,8 @@
                 const first = cur.length > 0 ? cur[0].page : all[0].page;
                 const nextLast = cur.length > 0 ? cur[cur.length - 1].page + 1 : all[0].page;
                 applyPublishRange(first, nextLast);
+                // 投影は公開中ページだけを映すので、いま開放したページへ送る
+                setBoardSlidePage(Math.max(0, (slidePagesRef.current || []).length - 1));
                 showToast(`🔓 ${nextLast} ページを公開しました`);
             };
 
@@ -3933,21 +3935,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         <i className="fa-solid fa-minus text-[10px]"></i>
                                     </button>
                                     <button
-                                        onClick={() => {
-                                            const all = allSlidePagesRef.current || [];
-                                            const cur = all[Math.min(boardSlidePage, Math.max(0, all.length - 1))];
-                                            if (!cur) return;
-                                            const first = (slidePagesRef.current && slidePagesRef.current.length > 0)
-                                                ? slidePagesRef.current[0].page
-                                                : all[0].page;
-                                            applyPublishRange(Math.min(first, cur.page), cur.page);
-                                            showToast(`🔓 ${cur.page} ページまで公開しました`);
-                                        }}
-                                        title="いま投影しているページまでを受講者に公開する"
-                                        className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white font-bold text-[10px] transition flex items-center gap-1 active:scale-95">
-                                        <i className="fa-solid fa-flag-checkered text-[9px]"></i> ここまで公開
-                                    </button>
-                                    <button
                                         onClick={handleRevealNextPage}
                                         disabled={slidePages.length > 0 && allSlidePages.length > 0 && slidePages[slidePages.length - 1].page >= allSlidePages[allSlidePages.length - 1].page}
                                         title="次の1ページ（答え）を受講者へ公開する"
@@ -3980,11 +3967,12 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 allowFullScreen={true}
                                 frameBorder="0"
                             ></iframe>
-                        ) : allSlidePages.length > 0 ? (
+                        ) : slidePages.length > 0 ? (
                             <div className="w-full h-full flex">
-                                {/* 講師の投影は全ページ。受講者に届いているのは公開範囲だけ */}
+                                {/* 投影は室内に映るため、受講者へ公開中のページだけを表示する。
+                                    未公開の答えページが投影に出てしまうのを防ぐ。 */}
                                 <RestrictedSlideViewer
-                                    pages={allSlidePages}
+                                    pages={slidePages}
                                     progress={slideDeckProgress}
                                     hideLockBadge={true}
                                     showToast={showToast}
@@ -3992,15 +3980,13 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     onIndexChange={setBoardSlidePage}
                                 />
                             </div>
-                        ) : slidePages.length > 0 ? (
-                            <div className="w-full h-full flex">
-                                <RestrictedSlideViewer
-                                    pages={slidePages}
-                                    progress={slideDeckProgress}
-                                    showToast={showToast}
-                                    index={boardSlidePage}
-                                    onIndexChange={setBoardSlidePage}
-                                />
+                        ) : allSlidePages.length > 0 ? (
+                            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 p-8">
+                                <i className="fa-solid fa-lock text-4xl mb-3 text-slate-600"></i>
+                                <p className="font-bold text-sm">公開中のページがありません</p>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    「スライド設定」で公開範囲を指定するか、「次の1P公開」で開放してください
+                                </p>
                             </div>
                         ) : (
                             <div className="text-center text-slate-400">
