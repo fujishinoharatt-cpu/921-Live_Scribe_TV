@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.58.0)</title>
+    <title>研修ワークナビ AI (v1.59.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.58.0";
+        const APP_VERSION = "v1.59.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -547,6 +547,7 @@
             const [board, setBoard] = useState(null);    // { themeTitle, cards, categories, summaries }
             const [status, setStatus] = useState(null);  // { timerSeconds, isTimerRunning, isTimeUp, isLocked }
             const [joinInfo, setJoinInfo] = useState(null); // { url }
+            const [screenUrl, setScreenUrl] = useState(null); // 画面配信の最新フレーム
 
             // デッキを読み込む（講師ウィンドウと同じIndexedDBを共有）
             const loadDeck = async () => {
@@ -570,11 +571,18 @@
                         if (d.type === 'SHOW_PAGE') setPageNo(d.page);
                         else if (d.type === 'DECK_UPDATED') loadDeck();
                         else if (d.type === 'SET_MODE') {
-                            setMode(['board', 'qr', 'slide'].includes(d.mode) ? d.mode : 'slide');
+                            setMode(['board', 'qr', 'screen', 'slide'].includes(d.mode) ? d.mode : 'slide');
                         }
                         else if (d.type === 'BOARD_DATA') setBoard(d.board || null);
                         else if (d.type === 'STATUS') setStatus(d.status || null);
                         else if (d.type === 'JOIN_INFO') setJoinInfo(d.join || null);
+                        else if (d.type === 'SCREEN_FRAME' && d.bytes) {
+                            const url = URL.createObjectURL(new Blob([d.bytes], { type: d.mime || 'image/jpeg' }));
+                            setScreenUrl(prev => {
+                                if (prev) URL.revokeObjectURL(prev);
+                                return url;
+                            });
+                        }
                     };
                     ch.postMessage({ type: 'PROJECTOR_READY' });
                 } catch (e) {
@@ -584,6 +592,35 @@
             }, []);
 
             const current = pages.find(p => p.page === pageNo);
+
+            // --- 画面配信の投影（講師PCの画面をそのまま大きく出す） ---
+            if (mode === 'screen') {
+                return (
+                    <div className="w-full h-full bg-black flex items-center justify-center select-none relative group">
+                        <a
+                            href={window.location.pathname}
+                            title="講師画面へ戻る"
+                            className="absolute top-2 left-2 z-20 text-[11px] font-bold text-slate-300 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 rounded-lg px-2.5 py-1.5 opacity-0 group-hover:opacity-100 focus:opacity-100 transition">
+                            <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る
+                        </a>
+                        {screenUrl ? (
+                            <img
+                                src={screenUrl}
+                                alt="講師の画面"
+                                draggable={false}
+                                onContextMenu={(e) => e.preventDefault()}
+                                className="max-w-full max-h-full object-contain"
+                            />
+                        ) : (
+                            <div className="text-center text-slate-400 p-8">
+                                <i className="fa-solid fa-desktop text-5xl mb-4 text-slate-600"></i>
+                                <p className="text-base font-bold text-slate-200">画面配信の受信待ち</p>
+                                <p className="text-xs mt-2">講師画面のヘッダーから「画面配信」を開始してください</p>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
 
             // --- 参加用QRの投影（開始時に全員に読み取ってもらう） ---
             if (mode === 'qr') {
@@ -1530,6 +1567,16 @@
                                 if (!blob || blob.size > SCREEN_MAX_PAYLOAD) { done(); return; }
                                 const bytes = new Uint8Array(await blob.arrayBuffer());
                                 screenLastFrameRef.current = { bytes, mime: blob.type || SCREEN_IMAGE_TYPE };
+
+                                // 投影画面が「画面」モードのときだけ、同じフレームを別ウィンドウにも渡す。
+                                // 同一PC内なのでネットワークは介さない。
+                                if (projectorModeRef.current === 'screen' && projectorChRef.current) {
+                                    projectorChRef.current.postMessage({
+                                        type: 'SCREEN_FRAME',
+                                        mime: blob.type || SCREEN_IMAGE_TYPE,
+                                        bytes
+                                    });
+                                }
                                 screenLastSentAtRef.current = now;
                                 screenSentCountRef.current += 1;
 
@@ -4256,6 +4303,12 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         className={`px-2 py-1 rounded text-[11px] font-bold transition ${projectorMode === 'qr' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
                         QR
                     </button>
+                    <button
+                        onClick={() => setProjectorMode('screen')}
+                        title="投影画面に、配信中の講師PC画面を出す"
+                        className={`px-2 py-1 rounded text-[11px] font-bold transition ${projectorMode === 'screen' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                        画面
+                    </button>
                     <a
                         href={`${window.location.pathname}?role=projector`}
                         target="_blank"
@@ -4347,6 +4400,12 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     title="投影画面に参加用QRコードを出す"
                                     className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectorMode === 'qr' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
                                     QR
+                                </button>
+                                <button
+                                    onClick={() => setProjectorMode('screen')}
+                                    title="投影画面に、配信中の講師PC画面を出す"
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectorMode === 'screen' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                                    画面
                                 </button>
                             </div>
                             {/* window.open はポップアップ扱いにならず「今のタブが投影画面に置き換わる」
