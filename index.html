@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.53.0)</title>
+    <title>研修ワークナビ AI (v1.54.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.53.0";
+        const APP_VERSION = "v1.54.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -3904,7 +3904,9 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     ) : (
         /* Facilitator Board View */
         <>
-            <div className="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between shadow-sm z-10 shrink-0 gap-3">
+            {/* 板書作業用のツールバー。スライド投影中は使わないので隠し、
+                投影バー側の操作だけに絞る（画面も広く使える）。 */}
+            <div className={`bg-white border-b border-slate-200 px-6 py-2.5 items-center justify-between shadow-sm z-10 shrink-0 gap-3 ${viewMode === 'slide' ? 'hidden' : 'flex'}`}>
                 <form onSubmit={handleAddCard} className="flex items-center space-x-2.5 flex-1 max-w-5xl">
                     {/* ① 講師の名前入力 */}
                     <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 shrink-0">
