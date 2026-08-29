@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.51.0)</title>
+    <title>研修ワークナビ AI (v1.53.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.51.0";
+        const APP_VERSION = "v1.53.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -568,7 +568,15 @@
             const current = pages.find(p => p.page === pageNo);
 
             return (
-                <div className="w-full h-full bg-black flex items-center justify-center select-none">
+                <div className="w-full h-full bg-black flex items-center justify-center select-none relative group">
+                    {/* 万一この画面が講師のタブを置き換えてしまっても戻れるようにする。
+                        投影中は普段見えず、マウスを乗せたときだけ現れる。 */}
+                    <a
+                        href={window.location.pathname}
+                        title="講師画面へ戻る"
+                        className="absolute top-2 left-2 z-10 text-[11px] font-bold text-slate-300 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 rounded-lg px-2.5 py-1.5 opacity-0 group-hover:opacity-100 focus:opacity-100 transition">
+                        <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る
+                    </a>
                     {current ? (
                         <img
                             src={current.dataUrl}
@@ -578,14 +586,24 @@
                             className="max-w-full max-h-full object-contain"
                         />
                     ) : (
-                        <div className="text-center text-slate-500 p-8">
-                            <i className="fa-solid fa-display text-5xl mb-4"></i>
-                            <p className="text-sm font-bold text-slate-300">投影ウィンドウ</p>
-                            <p className="text-xs mt-2">
-                                {ready
-                                    ? 'このウィンドウを投影用モニターへ移動し、F11 で全画面にしてください'
-                                    : '資料を読み込んでいます…'}
-                            </p>
+                        <div className="text-center text-slate-400 p-8 max-w-md">
+                            <i className="fa-solid fa-display text-5xl mb-4 text-slate-600"></i>
+                            <p className="text-base font-bold text-slate-200">投影画面</p>
+                            {ready ? (
+                                <div className="mt-4 text-left bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-2">
+                                    <p className="text-xs font-bold text-slate-300">この画面の使い方</p>
+                                    <ol className="text-xs text-slate-400 space-y-1.5 list-decimal pl-4">
+                                        <li>このタブを<b className="text-slate-200">ドラッグして切り離し</b>、投影用モニターへ移動</li>
+                                        <li><b className="text-slate-200">F11</b> を押して全画面にする</li>
+                                        <li>講師画面でページを送ると、ここも自動で切り替わります</li>
+                                    </ol>
+                                    <p className="text-[11px] text-amber-300/90 pt-1">
+                                        講師画面で「スライド投影」を開いていないと、ページが送られてきません。
+                                    </p>
+                                </div>
+                            ) : (
+                                <p className="text-xs mt-2">資料を読み込んでいます…</p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -4052,21 +4070,18 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 </div>
                             )}
                             {allSlidePages.length > 0 && (
-                                <button
-                                    onClick={() => {
-                                        const w = window.open(
-                                            `${window.location.pathname}?role=projector`,
-                                            'bansho_projector',
-                                            'width=1280,height=720'
-                                        );
-                                        if (!w) showToast('⚠️ ポップアップがブロックされました。許可してください');
-                                        else showToast('📽️ 投影ウィンドウを開きました。投影用モニターへ移動してF11で全画面に');
-                                    }}
-                                    title="投影用の別ウィンドウを開く（外部モニターへ移動して全画面にしてください）"
+                                /* window.open はポップアップ扱いにならず「今のタブが投影画面に置き換わる」
+                                   環境があるため、必ず別タブで開くリンクにしている。
+                                   これなら講師のボードが消えることはない。 */
+                                <a
+                                    href={`${window.location.pathname}?role=projector`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title="投影用の画面を別タブで開く（投影モニターへ移してF11で全画面）"
                                     className={`px-2.5 py-1 rounded transition flex items-center gap-1 font-medium ${projectorOpen ? 'bg-emerald-700 text-white hover:bg-emerald-600' : 'text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700'}`}>
                                     <i className="fa-solid fa-display"></i>
-                                    {projectorOpen ? '投影中' : '投影ウィンドウ'}
-                                </button>
+                                    {projectorOpen ? '投影中' : '投影画面を開く'}
+                                </a>
                             )}
                             <button
                                 onClick={() => {
