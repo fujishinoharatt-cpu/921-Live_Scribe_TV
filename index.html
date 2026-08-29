@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.62.0)</title>
+    <title>研修ワークナビ AI (v1.63.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.62.0";
+        const APP_VERSION = "v1.63.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -4317,34 +4317,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     </button>
                 </form>
 
-                <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-4">
-                    <button
-                        onClick={() => setViewMode('kanban')}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                        <i className="fa-solid fa-columns"></i> グループ表示
-                    </button>
-                    <button
-                        onClick={() => setViewMode('free')}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'free' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                        <i className="fa-solid fa-border-all"></i> 全アイテム一覧
-                    </button>
-                    <button
-                        onClick={() => {
-                            if (!slideUrl && slidePages.length === 0 && allSlidePages.length === 0) {
-                                setSlideInputUrl('');
-                                setShowSlideModal(true);
-                                showToast('💡 PDFを読み込むか、資料URLを設定してください');
-                            } else {
-                                setViewMode('slide');
-                            }
-                        }}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'slide' ? 'bg-indigo-600 text-white shadow-sm font-bold' : 'text-indigo-600 hover:bg-indigo-50'}`}>
-                        <i className="fa-solid fa-file-powerpoint text-indigo-400"></i> 📄 スライド投影
-                    </button>
-                </div>
-
                 {/* 📽️ 投影画面（別モニター）の操作。板書作業中でも切り替えられる */}
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-2">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-4">
                     <span className="text-[10px] font-bold text-slate-500 px-1">投影</span>
                     <button
                         onClick={() => setProjectorMode('slide')}
@@ -4379,6 +4353,31 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                         <i className="fa-solid fa-display text-[10px]"></i>
                         {projectorOpen ? '投影中' : '開く'}
                     </a>
+                </div>
+                <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-2">
+                    <button
+                        onClick={() => setViewMode('kanban')}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <i className="fa-solid fa-columns"></i> グループ表示
+                    </button>
+                    <button
+                        onClick={() => setViewMode('free')}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'free' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <i className="fa-solid fa-border-all"></i> 全アイテム一覧
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (!slideUrl && slidePages.length === 0 && allSlidePages.length === 0) {
+                                setSlideInputUrl('');
+                                setShowSlideModal(true);
+                                showToast('💡 PDFを読み込むか、資料URLを設定してください');
+                            } else {
+                                setViewMode('slide');
+                            }
+                        }}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'slide' ? 'bg-indigo-600 text-white shadow-sm font-bold' : 'text-indigo-600 hover:bg-indigo-50'}`}>
+                        <i className="fa-solid fa-file-powerpoint text-indigo-400"></i> 📄 スライド投影
+                    </button>
                 </div>
             </div>
 
