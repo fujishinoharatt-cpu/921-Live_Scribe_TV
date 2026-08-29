@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.72.0)</title>
+    <title>研修ワークナビ AI (v1.72.1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.72.0";
+        const APP_VERSION = "v1.72.1";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -533,7 +533,7 @@
 
         // 投影画面に出せるもの（表示名）
         const PROJECTOR_MODE_LABELS = {
-            slide: '投影画面',
+            slide: 'スライド',
             board: '板書',
             qr: '参加用QR',
             screen: '画面配信'
@@ -3424,7 +3424,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                             className={`px-2.5 py-1.5 rounded-xl border text-xs transition flex items-center gap-1.5 font-bold shadow-sm ${projectorOpen ? 'bg-emerald-950 text-emerald-300 border-emerald-500/60 hover:bg-emerald-900' : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'}`}>
                                             <i className="fa-solid fa-display text-sky-400"></i>
                                             <span className="hidden xl:inline">
-                                                {PROJECTOR_MODE_LABELS[projectorMode] || '投影画面'}
+                                                投影画面
                                             </span>
                                             <i className={`fa-solid ${showProjectorMenu ? 'fa-chevron-up' : 'fa-chevron-down'} text-[9px]`}></i>
                                         </button>
