@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.60.0)</title>
+    <title>研修ワークナビ AI (v1.61.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.60.0";
+        const APP_VERSION = "v1.61.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -548,6 +548,7 @@
             const [status, setStatus] = useState(null);  // { timerSeconds, isTimerRunning, isTimeUp, isLocked }
             const [joinInfo, setJoinInfo] = useState(null); // { url }
             const [screenUrl, setScreenUrl] = useState(null); // 画面配信の最新フレーム
+            const [staleMode, setStaleMode] = useState(null);  // このウィンドウが知らないモードを受け取った
 
             // デッキを読み込む（講師ウィンドウと同じIndexedDBを共有）
             const loadDeck = async () => {
@@ -571,7 +572,16 @@
                         if (d.type === 'SHOW_PAGE') setPageNo(d.page);
                         else if (d.type === 'DECK_UPDATED') loadDeck();
                         else if (d.type === 'SET_MODE') {
-                            setMode(['board', 'qr', 'screen', 'slide'].includes(d.mode) ? d.mode : 'slide');
+                            // 知らないモードが来たら黙ってスライドに落とさない。
+                            //   投影ウィンドウを開いたままアプリを更新すると古いコードが
+                            //   動き続け、「押しても切り替わらない」原因になるため、
+                            //   再読み込みが必要なことをはっきり出す。
+                            if (['board', 'qr', 'screen', 'slide'].includes(d.mode)) {
+                                setMode(d.mode);
+                                setStaleMode(null);
+                            } else {
+                                setStaleMode(d.mode || '(不明)');
+                            }
                         }
                         else if (d.type === 'BOARD_DATA') setBoard(d.board || null);
                         else if (d.type === 'STATUS') setStatus(d.status || null);
@@ -593,6 +603,23 @@
 
             const current = pages.find(p => p.page === pageNo);
 
+            // --- この投影ウィンドウが古い場合の案内 ---
+            if (staleMode) {
+                return (
+                    <div className="w-full h-full bg-amber-50 flex items-center justify-center p-8 select-none">
+                        <div className="text-center max-w-lg">
+                            <i className="fa-solid fa-rotate text-5xl text-amber-500 mb-4"></i>
+                            <p className="text-xl font-bold text-amber-900">この投影ウィンドウを再読み込みしてください</p>
+                            <p className="text-sm text-amber-800 mt-3 leading-relaxed">
+                                講師画面が「<b>{staleMode}</b>」表示を要求しましたが、このウィンドウは古いままで対応していません。<br />
+                                <b>Ctrl + Shift + R</b> で再読み込みすると表示できます。
+                            </p>
+                            <p className="text-xs text-amber-700 mt-4 font-mono">この画面のバージョン: {APP_VERSION}</p>
+                        </div>
+                    </div>
+                );
+            }
+
             // --- 画面配信の投影（講師PCの画面をそのまま大きく出す） ---
             if (mode === 'screen') {
                 return (
@@ -601,7 +628,7 @@
                             href={window.location.pathname}
                             title="講師画面へ戻る"
                             className="absolute top-2 left-2 z-20 text-[11px] font-bold text-slate-300 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 rounded-lg px-2.5 py-1.5 opacity-0 group-hover:opacity-100 focus:opacity-100 transition">
-                            <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る
+                            <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る <span className="opacity-60 font-mono ml-1">{APP_VERSION}</span>
                         </a>
                         {screenUrl ? (
                             <img
@@ -648,7 +675,7 @@
                             href={window.location.pathname}
                             title="講師画面へ戻る"
                             className="absolute top-2 left-2 z-20 text-[11px] font-bold text-slate-600 bg-white/90 hover:bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 opacity-0 group-hover:opacity-100 focus:opacity-100 transition">
-                            <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る
+                            <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る <span className="opacity-60 font-mono ml-1">{APP_VERSION}</span>
                         </a>
 
                         <h1 className="text-4xl font-bold text-slate-800 mb-2">スマホで参加してください</h1>
@@ -691,7 +718,7 @@
                             href={window.location.pathname}
                             title="講師画面へ戻る"
                             className="absolute top-2 left-2 z-20 text-[11px] font-bold text-slate-600 bg-white/90 hover:bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 opacity-0 group-hover:opacity-100 focus:opacity-100 transition">
-                            <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る
+                            <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る <span className="opacity-60 font-mono ml-1">{APP_VERSION}</span>
                         </a>
 
                         <div className="bg-slate-900 text-white px-6 py-3 shrink-0 flex items-center justify-between gap-6">
@@ -772,7 +799,7 @@
                         href={window.location.pathname}
                         title="講師画面へ戻る"
                         className="absolute top-2 left-2 z-10 text-[11px] font-bold text-slate-300 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 rounded-lg px-2.5 py-1.5 opacity-0 group-hover:opacity-100 focus:opacity-100 transition">
-                        <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る
+                        <i className="fa-solid fa-arrow-left mr-1"></i> 講師画面へ戻る <span className="opacity-60 font-mono ml-1">{APP_VERSION}</span>
                     </a>
                     {current ? (
                         <img
