@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.71.1)</title>
+    <title>研修ワークナビ AI (v1.72.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.71.1";
+        const APP_VERSION = "v1.72.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -4487,39 +4487,57 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     />
                                 </div>
 
-                                {/* 📋 発表者ビュー: 次のページを手元だけで先読みする（未公開でも表示） */}
+                                {/* 📋 発表者ビュー: 前後のページを手元だけで確認する（未公開でも表示） */}
                                 {(() => {
                                     const cur = slidePages[Math.min(boardSlidePage, Math.max(0, slidePages.length - 1))];
                                     if (!cur) return null;
-                                    const nextInDeck = allSlidePages.find(p => p.page === cur.page + 1);
-                                    const isPublished = !!slidePages.find(p => p.page === cur.page + 1);
+                                    // 手元では公開範囲に関係なく全ページから拾う（答えの先読み用）
+                                    const around = [
+                                        { key: 'prev', label: '前のページ', page: cur.page - 1 },
+                                        { key: 'next', label: '次のページ', page: cur.page + 1 },
+                                        { key: 'next2', label: '次の次のページ', page: cur.page + 2 }
+                                    ];
                                     return (
                                         <div className="w-56 xl:w-64 shrink-0 hidden lg:flex flex-col gap-2 bg-slate-900 border border-slate-700 rounded-xl p-2">
-                                            <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5">
+                                            <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 shrink-0">
                                                 <i className="fa-solid fa-eye text-slate-500"></i>
-                                                次のページ（手元のみ）
+                                                前後のページ（手元のみ）
                                             </p>
-                                            <div className="flex-1 min-h-0 flex items-center justify-center bg-black rounded-lg overflow-hidden">
-                                                {nextInDeck ? (
-                                                    <img
-                                                        src={nextInDeck.dataUrl}
-                                                        alt={`次のページ ${nextInDeck.page}`}
-                                                        draggable={false}
-                                                        className="max-w-full max-h-full object-contain"
-                                                    />
-                                                ) : (
-                                                    <p className="text-[10px] text-slate-600 p-3 text-center">最終ページです</p>
-                                                )}
+                                            <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+                                                {around.map(item => {
+                                                    const pg = allSlidePages.find(p => p.page === item.page);
+                                                    const isPublished = !!slidePages.find(p => p.page === item.page);
+                                                    return (
+                                                        <div key={item.key} className={`flex-1 min-h-0 flex flex-col rounded-lg border p-1.5 ${item.key === 'next' ? 'border-indigo-500/60 bg-indigo-950/30' : 'border-slate-700 bg-slate-950/40'}`}>
+                                                            <div className="flex items-center justify-between mb-1 gap-1 shrink-0">
+                                                                <span className={`text-[10px] font-bold truncate ${item.key === 'next' ? 'text-indigo-300' : 'text-slate-400'}`}>
+                                                                    {item.label}
+                                                                </span>
+                                                                {pg && (
+                                                                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold ${isPublished ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                                                                        {item.page}P {isPublished ? '公開済' : '未公開'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex-1 min-h-0 flex items-center justify-center bg-black rounded overflow-hidden">
+                                                                {pg ? (
+                                                                    <img
+                                                                        src={pg.dataUrl}
+                                                                        alt={`${item.label} ${pg.page}`}
+                                                                        draggable={false}
+                                                                        className="max-w-full max-h-full object-contain"
+                                                                    />
+                                                                ) : (
+                                                                    <p className="text-[9px] text-slate-600 text-center px-2">
+                                                                        {item.page < 1 ? '最初のページです' : '最終ページです'}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
-                                            {nextInDeck && (
-                                                <div className="flex items-center justify-between text-[10px]">
-                                                    <span className="font-mono text-slate-400">{nextInDeck.page} ページ</span>
-                                                    <span className={`px-1.5 py-0.5 rounded font-bold ${isPublished ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                                                        {isPublished ? '公開済み' : '未公開'}
-                                                    </span>
-                                                </div>
-                                            )}
-                                            <p className="text-[9px] text-slate-500 leading-snug">
+                                            <p className="text-[9px] text-slate-500 leading-snug shrink-0">
                                                 この欄は投影ウィンドウには映りません
                                             </p>
                                         </div>
