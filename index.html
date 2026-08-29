@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.69.0)</title>
+    <title>研修ワークナビ AI (v1.71.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.69.0";
+        const APP_VERSION = "v1.71.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -3391,49 +3391,29 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                         <span className="text-[11px]">{connectedCount > 0 ? `👥 受講者 ${connectedCount}台` : '👥 受講者 待機中'}</span>
                                     </div>
 
-                                    {/* ⏱️ 研修進行グループ（タイマー & 投稿受付ロック） */}
-                                    <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                                        {/* タイマー表示 & コントロール */}
-                                        <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
-                                            {timerSeconds > 0 || isTimeUp ? (
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className={`font-mono font-black text-xs sm:text-sm px-1.5 py-0.2 rounded flex items-center gap-1 ${isTimeUp ? 'bg-rose-600 text-white animate-bounce' : (timerSeconds <= 30 ? 'bg-amber-500 text-slate-950 animate-pulse' : 'bg-indigo-900/80 text-indigo-200')}`}>
-                                                        <span>{isTimeUp ? '🔔 終了' : '⏱️'}</span>
-                                                        <span>{formatTime(timerSeconds)}</span>
-                                                    </span>
-                                                    <button
-                                                        onClick={handleToggleTimer}
-                                                        title={isTimerRunning ? "一時停止" : "再開"}
-                                                        className="text-slate-300 hover:text-white p-0.5 text-xs transition cursor-pointer">
-                                                        <i className={`fa-solid ${isTimerRunning ? 'fa-pause' : 'fa-play'}`}></i>
-                                                    </button>
-                                                    <button
-                                                        onClick={handleResetTimer}
-                                                        title="タイマーをリセット"
-                                                        className="text-slate-400 hover:text-rose-400 p-0.5 text-xs transition cursor-pointer">
-                                                        <i className="fa-solid fa-xmark"></i>
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center gap-0.5">
-                                                    <span className="text-[10px] text-slate-400 font-bold mr-0.5">⏱️</span>
-                                                    <button onClick={() => handleStartTimer(1)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer">1分</button>
-                                                    <button onClick={() => handleStartTimer(3)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-indigo-300 hover:text-white bg-indigo-950/60 border border-indigo-800/40 cursor-pointer">3分</button>
-                                                    <button onClick={() => handleStartTimer(5)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer">5分</button>
-                                                    <button onClick={() => handleStartTimer(10)} className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer">10分</button>
-                                                </div>
-                                            )}
+                                    {/* ⏱️ 実行中のタイマーだけはヘッダーに残す。
+                                        スライド投影中も残り時間が見えるようにするため。
+                                        開始ボタンと投稿受付の切替は板書ツールバー側にある。 */}
+                                    {(timerSeconds > 0 || isTimeUp) && (
+                                        <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800 shrink-0">
+                                            <span className={`font-mono font-black text-xs sm:text-sm px-1.5 py-0.2 rounded flex items-center gap-1 ${isTimeUp ? 'bg-rose-600 text-white animate-bounce' : (timerSeconds <= 30 ? 'bg-amber-500 text-slate-950 animate-pulse' : 'bg-indigo-900/80 text-indigo-200')}`}>
+                                                <span>{isTimeUp ? '🔔 終了' : '⏱️'}</span>
+                                                <span>{formatTime(timerSeconds)}</span>
+                                            </span>
+                                            <button
+                                                onClick={handleToggleTimer}
+                                                title={isTimerRunning ? "一時停止" : "再開"}
+                                                className="text-slate-300 hover:text-white p-0.5 text-xs transition cursor-pointer">
+                                                <i className={`fa-solid ${isTimerRunning ? 'fa-pause' : 'fa-play'}`}></i>
+                                            </button>
+                                            <button
+                                                onClick={handleResetTimer}
+                                                title="タイマーをリセット"
+                                                className="text-slate-400 hover:text-rose-400 p-0.5 text-xs transition cursor-pointer">
+                                                <i className="fa-solid fa-xmark"></i>
+                                            </button>
                                         </div>
-
-                                        {/* 🔒 投稿受付ロック切り替えボタン */}
-                                        <button
-                                            onClick={handleToggleLock}
-                                            title={isSubmissionsLocked ? "クリックして投稿受付を再開" : "クリックして受講者の投稿を一時停止（解説モード）"}
-                                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95 shadow-sm cursor-pointer ${isSubmissionsLocked ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-600/30 animate-pulse'}`}>
-                                            <i className={`fa-solid ${isSubmissionsLocked ? 'fa-lock' : 'fa-lock-open'}`}></i>
-                                            <span className="hidden sm:inline">{isSubmissionsLocked ? '受付停止中' : '受付中'}</span>
-                                        </button>
-                                    </div>
+                                    )}
 
                                     {/* 📽️ 投影画面の操作。板書中も投影中も同じ位置にあるよう常時表示のヘッダーに置く。
                                         ボタンを並べると横幅が足りないため、クリックで開く形にしている。 */}
@@ -4278,7 +4258,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
         <>
             {/* 板書作業用のツールバー。スライド投影中は使わないので隠し、
                 投影バー側の操作だけに絞る（画面も広く使える）。 */}
-            <div className={`bg-white border-b border-slate-200 px-6 py-2.5 items-center justify-between shadow-sm z-10 shrink-0 gap-3 ${viewMode === 'slide' ? 'hidden' : 'flex'}`}>
+            <div className={`bg-white border-b border-slate-200 px-6 py-2.5 flex-wrap items-center justify-between shadow-sm z-10 shrink-0 gap-y-1.5 gap-x-3 ${viewMode === 'slide' ? 'hidden' : 'flex'}`}>
                 <form onSubmit={handleAddCard} className="flex items-center space-x-2.5 flex-1 max-w-5xl">
                     {/* ① 講師の名前入力 */}
                     <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 shrink-0">
@@ -4356,17 +4336,38 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     </button>
                 </form>
 
-                <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-4">
+                {/* ⏱️ タイマー開始と投稿受付は板書作業用。ここにまとめる */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-4">
+                    <span className="text-[10px] text-slate-500 font-bold px-1">⏱️</span>
+                    <button onClick={() => handleStartTimer(1)} className="px-1.5 py-1 hover:bg-white rounded text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">1分</button>
+                    <button onClick={() => handleStartTimer(3)} className="px-1.5 py-1 rounded text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition">3分</button>
+                    <button onClick={() => handleStartTimer(5)} className="px-1.5 py-1 hover:bg-white rounded text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">5分</button>
+                    <button onClick={() => handleStartTimer(10)} className="px-1.5 py-1 hover:bg-white rounded text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">10分</button>
+                    <button
+                        onClick={handleToggleLock}
+                        title={isSubmissionsLocked ? "クリックして投稿受付を再開" : "クリックして受講者の投稿を一時停止（解説モード）"}
+                        className={`ml-1 px-2 py-1 rounded text-[11px] font-bold transition flex items-center gap-1 active:scale-95 ${isSubmissionsLocked ? 'bg-amber-500 text-white hover:bg-amber-400' : 'bg-emerald-600 text-white hover:bg-emerald-500 animate-pulse'}`}>
+                        <i className={`fa-solid ${isSubmissionsLocked ? 'fa-lock' : 'fa-lock-open'} text-[10px]`}></i>
+                        {isSubmissionsLocked ? '受付停止中' : '受付中'}
+                    </button>
+                </div>
+
+                {/* ② 表示切替（板書の見せ方） */}
+                <div className="flex items-center space-x-0.5 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-2">
                     <button
                         onClick={() => setViewMode('kanban')}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                        <i className="fa-solid fa-columns"></i> グループ表示
+                        className={`px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1 transition ${viewMode === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <i className="fa-solid fa-columns text-[10px]"></i> グループ表示
                     </button>
                     <button
                         onClick={() => setViewMode('free')}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'free' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                        <i className="fa-solid fa-border-all"></i> 全アイテム一覧
+                        className={`px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1 transition ${viewMode === 'free' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <i className="fa-solid fa-border-all text-[10px]"></i> 全アイテム一覧
                     </button>
+                </div>
+
+                {/* ③ スライド投影への切り替えは別グループにする */}
+                <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 ml-2">
                     <button
                         onClick={() => {
                             if (!slideUrl && slidePages.length === 0 && allSlidePages.length === 0) {
@@ -4377,8 +4378,8 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 setViewMode('slide');
                             }
                         }}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${viewMode === 'slide' ? 'bg-indigo-600 text-white shadow-sm font-bold' : 'text-indigo-600 hover:bg-indigo-50'}`}>
-                        <i className="fa-solid fa-file-powerpoint text-indigo-400"></i> 📄 スライド投影
+                        className={`px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1 transition ${viewMode === 'slide' ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-600 hover:bg-indigo-50'}`}>
+                        <i className="fa-solid fa-file-powerpoint text-[10px]"></i> スライド投影
                     </button>
                 </div>
             </div>
