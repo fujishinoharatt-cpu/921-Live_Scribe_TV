@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.72.1)</title>
+    <title>研修ワークナビ AI (v1.72.2)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.72.1";
+        const APP_VERSION = "v1.72.2";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -307,13 +307,6 @@
             return url;
         };
 
-        const getEmbedUrlForSlide = (rawUrl) => {
-            return convertToEmbedUrl(rawUrl);
-        };
-
-        // ============================================================
-        // 📄 受講者用スライドビューアー（Googleスライド公式埋め込み＋公開範囲ガイダンス）
-        // ============================================================
         // ============================================================
         // 📄 受講者用スライドビューアー
         //   ① デッキ方式（推奨）: 講師PCでPDFから画像化した「許可ページのみ」を表示。
@@ -860,7 +853,7 @@
                 return saved;
             };
 
-            const [activeRoomId, setActiveRoomId] = useState(isParticipantOnly ? targetRoomParam : getInitialHostRoomId());
+            const [activeRoomId] = useState(isParticipantOnly ? targetRoomParam : getInitialHostRoomId());
             const [connectedCount, setConnectedCount] = useState(0);
             const [peerConnected, setPeerConnected] = useState(false);
 
@@ -874,7 +867,7 @@
                 return () => window.removeEventListener('resize', handleResize);
             }, []);
 
-            const [appRole, setAppRole] = useState(initialRole);
+            const [appRole] = useState(initialRole);
 
             // 参加者お名前変更ハンドラ
             const handleParticipantNameChange = (val) => {
@@ -1279,9 +1272,6 @@
                 }
             }, [isSubmissionsLocked]);
 
-            const peerRef = useRef(null);
-            const connRef = useRef(null);
-            const hostConnsRef = useRef([]); // 講師ボード接続クライアント一覧
             const sessionThemeTitleRef = useRef(sessionThemeTitle);
             const cardsRef = useRef(cards);
             const categoriesRef = useRef(categories);
