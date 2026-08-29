@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.64.0)</title>
+    <title>研修ワークナビ AI (v1.66.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.64.0";
+        const APP_VERSION = "v1.66.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -530,6 +530,14 @@
         //   画像はIndexedDBから直接読むので、表示するページ番号だけを受け取る。
         // ============================================================
         const PROJECTOR_CHANNEL = 'bansho_projector';
+
+        // 投影画面に出せるもの（表示名）
+        const PROJECTOR_MODE_LABELS = {
+            slide: 'スライド',
+            board: '板書',
+            qr: '参加用QR',
+            screen: '画面配信'
+        };
 
         // 投影画面用の残り時間表示（App内のformatTimeは使えないので独立して用意）
         const formatClock = (totalSeconds) => {
@@ -1071,6 +1079,7 @@
             const projectorChRef = useRef(null);
             const [projectorOpen, setProjectorOpen] = useState(false);
             // 投影画面に何を出すか（スライド / 板書）
+            const [showProjectorMenu, setShowProjectorMenu] = useState(false);
             const [projectorMode, setProjectorMode] = useState(() => {
                 return localStorage.getItem('bansho_projector_mode') || 'slide';
             });
@@ -3292,7 +3301,7 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                     )}
 
                     {/* Header (整理された1段統合・中央特大テーマ & 役割別ボタングループ) */}
-                    <header className={`bg-slate-950 text-white shadow-xl z-20 shrink-0 ${isParticipantOnly ? 'px-3.5 py-2' : 'px-5 py-2.5'} flex items-center justify-between border-b border-slate-800 gap-3`}>
+                    <header className={`bg-slate-950 text-white shadow-xl z-20 shrink-0 ${isParticipantOnly ? 'px-3.5 py-2' : 'px-5 py-2.5'} flex flex-wrap items-center justify-between border-b border-slate-800 gap-y-1.5 gap-x-3`}>
                         
                         {/* ⬅ 左側：ロゴ & アプリ名（3段構え: 講師PC / 一般PC / スマホ） */}
                         <div className="flex items-center space-x-2.5 shrink-0">
@@ -3427,6 +3436,51 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     </div>
 
                                     {/* 📄 スライド資料設定ボタン */}
+                                    {/* 📽️ 投影画面の操作をここに集約。
+                                        板書中も投影中も同じ位置にあるよう、常時表示のヘッダーに置く。
+                                        ボタンを並べると横幅が足りないため、クリックで開く形にしている。 */}
+                                    <div className="relative shrink-0">
+                                        <button
+                                            onClick={() => setShowProjectorMenu(v => !v)}
+                                            title="投影画面に何を出すかを選ぶ"
+                                            className={`px-2.5 py-1.5 rounded-xl border text-xs transition flex items-center gap-1.5 font-bold shadow-sm ${projectorOpen ? 'bg-emerald-950 text-emerald-300 border-emerald-500/60 hover:bg-emerald-900' : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'}`}>
+                                            <i className="fa-solid fa-display text-sky-400"></i>
+                                            <span className="hidden xl:inline">
+                                                {PROJECTOR_MODE_LABELS[projectorMode] || 'スライド'}
+                                            </span>
+                                            <i className={`fa-solid ${showProjectorMenu ? 'fa-chevron-up' : 'fa-chevron-down'} text-[9px]`}></i>
+                                        </button>
+
+                                        {showProjectorMenu && (
+                                            <>
+                                                <div className="fixed inset-0 z-40" onClick={() => setShowProjectorMenu(false)}></div>
+                                                <div className="absolute right-0 top-full mt-1.5 w-48 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 p-1.5">
+                                                    <p className="text-[10px] font-bold text-slate-400 px-2 py-1">投影画面に出すもの</p>
+                                                    {Object.keys(PROJECTOR_MODE_LABELS).map(key => (
+                                                        <button
+                                                            key={key}
+                                                            onClick={() => { setProjectorMode(key); setShowProjectorMenu(false); }}
+                                                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-between ${projectorMode === key ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-slate-100'}`}>
+                                                            {PROJECTOR_MODE_LABELS[key]}
+                                                            {projectorMode === key && <i className="fa-solid fa-check text-[10px]"></i>}
+                                                        </button>
+                                                    ))}
+                                                    <div className="border-t border-slate-100 mt-1.5 pt-1.5">
+                                                        <a
+                                                            href={`${window.location.pathname}?role=projector`}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            onClick={() => setShowProjectorMenu(false)}
+                                                            className="w-full px-2.5 py-1.5 rounded-lg text-xs font-bold text-indigo-600 hover:bg-indigo-50 transition flex items-center gap-1.5">
+                                                            <i className="fa-solid fa-up-right-from-square text-[10px]"></i>
+                                                            {projectorOpen ? '投影画面を開き直す' : '投影画面を開く'}
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+
                                     <button 
                                         onClick={() => {
                                             setSlideInputUrl(slideUrl);
@@ -4441,57 +4495,6 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     </button>
                                 </div>
                             )}
-                            {/* 投影画面に何を出すか */}
-                            <div className="flex items-center gap-0.5 bg-slate-950 border border-slate-700 rounded-lg p-0.5">
-                                <button
-                                    onClick={() => setProjectorMode('slide')}
-                                    title="投影画面にスライドを出す"
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectorMode === 'slide' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                                    スライド
-                                </button>
-                                <button
-                                    onClick={() => setProjectorMode('board')}
-                                    title="投影画面に板書を出す"
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectorMode === 'board' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                                    板書
-                                </button>
-                                <button
-                                    onClick={() => setProjectorMode('qr')}
-                                    title="投影画面に参加用QRコードを出す"
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectorMode === 'qr' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                                    QR
-                                </button>
-                                <button
-                                    onClick={() => setProjectorMode('screen')}
-                                    title="投影画面に、配信中の講師PC画面を出す"
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${projectorMode === 'screen' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                                    画面
-                                </button>
-                            </div>
-                            {/* window.open はポップアップ扱いにならず「今のタブが投影画面に置き換わる」
-                                環境があるため、必ず別タブで開くリンクにしている。 */}
-                            <a
-                                href={`${window.location.pathname}?role=projector`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="投影用の画面を別タブで開く（投影モニターへ移してF11で全画面）"
-                                className={`px-2.5 py-1 rounded transition flex items-center gap-1 font-medium ${projectorOpen ? 'bg-emerald-700 text-white hover:bg-emerald-600' : 'text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700'}`}>
-                                <i className="fa-solid fa-display"></i>
-                                {projectorOpen ? '投影中' : '投影画面を開く'}
-                            </a>
-                            {/* 板書側の「スライド設定」と同じモーダルを開く。
-                                投影中も設定を変えられるよう、名前も揃えてある。 */}
-                            <button
-                                onClick={() => {
-                                    setSlideInputUrl(slideUrl);
-                                    setSlideInputPageStart(slidePageStart);
-                                    setSlideInputPageEnd(slidePageEnd);
-                                    setShowSlideModal(true);
-                                }}
-                                title="研修スライドの設定（板書画面の「スライド設定」と同じ）"
-                                className="text-slate-400 hover:text-white px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 transition flex items-center gap-1 font-medium">
-                                <i className="fa-solid fa-file-powerpoint"></i> スライド設定
-                            </button>
                             <button 
                                 onClick={() => setViewMode('kanban')}
                                 className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-1 rounded-lg font-bold transition flex items-center gap-1.5 shadow active:scale-95">
