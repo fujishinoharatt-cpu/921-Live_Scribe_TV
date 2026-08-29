@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.59.0)</title>
+    <title>研修ワークナビ AI (v1.60.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.59.0";
+        const APP_VERSION = "v1.60.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -612,10 +612,27 @@
                                 className="max-w-full max-h-full object-contain"
                             />
                         ) : (
-                            <div className="text-center text-slate-400 p-8">
+                            <div className="text-center text-slate-400 p-8 max-w-lg">
                                 <i className="fa-solid fa-desktop text-5xl mb-4 text-slate-600"></i>
-                                <p className="text-base font-bold text-slate-200">画面配信の受信待ち</p>
-                                <p className="text-xs mt-2">講師画面のヘッダーから「画面配信」を開始してください</p>
+                                {status && status.screenSharing ? (
+                                    <>
+                                        <p className="text-base font-bold text-emerald-300">
+                                            <i className="fa-solid fa-spinner fa-spin mr-2"></i>配信中です。最初の画面を待っています…
+                                        </p>
+                                        <p className="text-xs mt-3 text-slate-500 leading-relaxed">
+                                            共有した画面に動きがないと最初の1枚が届くまで数秒かかります。<br />
+                                            10秒たっても出ない場合は、共有する対象を選び直してみてください。
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <p className="text-base font-bold text-slate-200">画面配信が開始されていません</p>
+                                        <p className="text-xs mt-3 text-slate-500 leading-relaxed">
+                                            講師画面のヘッダーにある<b className="text-slate-300">「画面配信」</b>を押し、<br />
+                                            共有するウィンドウやタブを選んでください。
+                                        </p>
+                                    </>
+                                )}
                             </div>
                         )}
                     </div>
@@ -1045,6 +1062,13 @@
                             const pub = slidePagesRef.current || [];
                             const cur = pub[Math.min(boardSlidePageRef.current, Math.max(0, pub.length - 1))];
                             if (cur) ch.postMessage({ type: 'SHOW_PAGE', page: cur.page });
+                            if (projectorModeRef.current === 'screen' && screenLastFrameRef.current) {
+                                ch.postMessage({
+                                    type: 'SCREEN_FRAME',
+                                    mime: screenLastFrameRef.current.mime,
+                                    bytes: screenLastFrameRef.current.bytes
+                                });
+                            }
                             if (projectorModeRef.current === 'board') {
                                 ch.postMessage({
                                     type: 'BOARD_DATA',
@@ -1080,6 +1104,15 @@
                 const ch = projectorChRef.current;
                 if (!ch) return;
                 ch.postMessage({ type: 'SET_MODE', mode: projectorModeRef.current });
+                // 画面モードに切り替えた直後に「受信待ち」で止まらないよう、
+                // 保持している最新フレームをすぐ送る（静止画面だと次の送信まで最大8秒空くため）
+                if (projectorModeRef.current === 'screen' && screenLastFrameRef.current) {
+                    ch.postMessage({
+                        type: 'SCREEN_FRAME',
+                        mime: screenLastFrameRef.current.mime,
+                        bytes: screenLastFrameRef.current.bytes
+                    });
+                }
                 if (projectorModeRef.current === 'board') {
                     ch.postMessage({
                         type: 'BOARD_DATA',
@@ -1198,10 +1231,11 @@
                         timerTotal,
                         isTimerRunning,
                         isTimeUp,
-                        isLocked: isSubmissionsLocked
+                        isLocked: isSubmissionsLocked,
+                        screenSharing: isScreenSharing
                     }
                 });
-            }, [timerSeconds, timerTotal, isTimerRunning, isTimeUp, isSubmissionsLocked, appRole, projectorOpen]);
+            }, [timerSeconds, timerTotal, isTimerRunning, isTimeUp, isSubmissionsLocked, isScreenSharing, appRole, projectorOpen]);
 
             useEffect(() => {
                 if (!isParticipantOnly) {
