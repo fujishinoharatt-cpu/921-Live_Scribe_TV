@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ワークナビ AI (v1.63.0)</title>
+    <title>研修ワークナビ AI (v1.64.0)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.63.0";
+        const APP_VERSION = "v1.64.0";
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -4479,13 +4479,18 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 <i className="fa-solid fa-display"></i>
                                 {projectorOpen ? '投影中' : '投影画面を開く'}
                             </a>
+                            {/* 板書側の「スライド設定」と同じモーダルを開く。
+                                投影中も設定を変えられるよう、名前も揃えてある。 */}
                             <button
                                 onClick={() => {
                                     setSlideInputUrl(slideUrl);
+                                    setSlideInputPageStart(slidePageStart);
+                                    setSlideInputPageEnd(slidePageEnd);
                                     setShowSlideModal(true);
                                 }}
+                                title="研修スライドの設定（板書画面の「スライド設定」と同じ）"
                                 className="text-slate-400 hover:text-white px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 transition flex items-center gap-1 font-medium">
-                                <i className="fa-solid fa-pen"></i> 資料変更
+                                <i className="fa-solid fa-file-powerpoint"></i> スライド設定
                             </button>
                             <button 
                                 onClick={() => setViewMode('kanban')}
