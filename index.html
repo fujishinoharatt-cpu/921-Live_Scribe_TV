@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ポータル(1.72.3)</title>
+    <title>研修ポータル(1.72.4)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,15 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.72.3";
+        const APP_VERSION = "v1.72.4";
+
+        // ブラウザ名を判定する（EdgeはChromeのUAも含むため先に判定）
+        const getBrowserName = () => {
+            const userAgent = navigator.userAgent;
+            if (/Edg\//.test(userAgent)) return 'Edge';
+            if (/Chrome\//.test(userAgent)) return 'Chrome';
+            return 'ブラウザ';
+        };
 
         // 付箋カラーパレット定義（①〜⑧班カラー ＋ 🩶グレー・🤍ホワイト）
         const COLOR_PALETTE = [
@@ -550,6 +558,11 @@
             const [joinInfo, setJoinInfo] = useState(null); // { url }
             const [screenUrl, setScreenUrl] = useState(null); // 画面配信の最新フレーム
             const [staleMode, setStaleMode] = useState(null);  // このウィンドウが知らないモードを受け取った
+
+            // 投影専用タブにブラウザ名とバージョンを表示する
+            useEffect(() => {
+                document.title = `画面配信 - ${getBrowserName()}(${APP_VERSION.replace(/^v/, '')})`;
+            }, []);
 
             // デッキを読み込む（講師ウィンドウと同じIndexedDBを共有）
             const loadDeck = async () => {
