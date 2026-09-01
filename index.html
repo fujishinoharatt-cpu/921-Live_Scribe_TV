@@ -869,6 +869,12 @@
 
             const [appRole] = useState(initialRole);
 
+            // 画面の役割ごとにブラウザのタブ名を切り替える
+            useEffect(() => {
+                const displayVersion = APP_VERSION.replace(/^v/, '');
+                document.title = `${isParticipantOnly ? '研修ポータル' : '講師進行ボード'}(${displayVersion})`;
+            }, [isParticipantOnly]);
+
             // 参加者お名前変更ハンドラ
             const handleParticipantNameChange = (val) => {
                 setParticipantName(val);
