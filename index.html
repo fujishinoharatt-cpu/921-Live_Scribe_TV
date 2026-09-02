@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ポータル(1.72.4)</title>
+    <title>研修ポータル(1.72.5)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.72.4";
+        const APP_VERSION = "v1.72.5";
 
         // ブラウザ名を判定する（EdgeはChromeのUAも含むため先に判定）
         const getBrowserName = () => {
@@ -851,6 +851,7 @@
         function App() {
             const urlParams = new URLSearchParams(window.location.search);
             const isParticipantOnly = urlParams.get('role') === 'participant';
+            const isDedicatedWindow = urlParams.get('dedicated') === '1';
             const initialRole = isParticipantOnly ? 'participant' : 'board';
             const targetRoomParam = urlParams.get('room') || '';
 
@@ -885,8 +886,10 @@
             // 画面の役割ごとにブラウザのタブ名を切り替える
             useEffect(() => {
                 const displayVersion = APP_VERSION.replace(/^v/, '');
-                document.title = `${isParticipantOnly ? '研修ポータル' : '講師進行ボード'}(${displayVersion})`;
-            }, [isParticipantOnly]);
+                document.title = isDedicatedWindow
+                    ? `受講者ポータル - ${getBrowserName()}(${displayVersion})`
+                    : `${isParticipantOnly ? '研修ポータル' : '講師進行ボード'}(${displayVersion})`;
+            }, [isParticipantOnly, isDedicatedWindow]);
 
             // 参加者お名前変更ハンドラ
             const handleParticipantNameChange = (val) => {
@@ -3285,6 +3288,27 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                 ? `${publicBaseUrl.trim().replace(/\/*$/, '/')}?role=participant&room=${activeRoomId}`
                 : participantUrl;
 
+            // 共有対象を選びやすくするため、専用ウインドウを同じ名前で開く
+            const openDedicatedWindow = (url, windowName) => {
+                const popup = window.open(
+                    url,
+                    windowName,
+                    'popup=yes,width=1280,height=800,left=40,top=40'
+                );
+                if (!popup) {
+                    showToast('⚠️ ポップアップがブロックされました。ブラウザの許可を確認してください');
+                    return;
+                }
+                popup.focus();
+            };
+
+            const openParticipantWindow = () => {
+                openDedicatedWindow(
+                    `${qrTargetUrl}&dedicated=1`,
+                    'kintone_training_participant_portal'
+                );
+            };
+
             // 高解像度で生成する。表示サイズ(256px)より十分大きい画像でないと
             // 高DPI/拡大表示のPCで補間ボケが起き、スマホのカメラが読み取れない。
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=50&data=${encodeURIComponent(qrTargetUrl)}`;
@@ -4800,6 +4824,12 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                     {qrTargetUrl}
                                 </div>
                                 <div className="space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={openParticipantWindow}
+                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2">
+                                        <i className="fa-solid fa-up-right-from-square"></i> 受講者ポータルを専用ウインドウで開く
+                                    </button>
                                     <button 
                                         onClick={() => {
                                             navigator.clipboard.writeText(qrTargetUrl);
@@ -5164,6 +5194,14 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
 
                                                 <button
                                                     type="button"
+                                                    onClick={() => openDedicatedWindow(sharedLink.url, 'kintone_training_external_site')}
+                                                    className="w-full text-[11px] font-bold text-indigo-600 hover:text-white hover:bg-indigo-600 border border-indigo-300 rounded-lg py-2 transition flex items-center justify-center gap-1.5">
+                                                    <i className="fa-solid fa-up-right-from-square text-[10px]"></i>
+                                                    外部サイトを専用ウインドウで開く
+                                                </button>
+
+                                                <button
+                                                    type="button"
                                                     onClick={handleClearSharedLink}
                                                     className="w-full text-[11px] font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-300 rounded-lg py-2 transition flex items-center justify-center gap-1.5">
                                                     <i className="fa-solid fa-trash-can text-[10px]"></i>
@@ -5259,6 +5297,13 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                                             onClick={() => handleShareLink(l.url, l.label)}
                                                             className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition">
                                                             配る
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openDedicatedWindow(l.url, 'kintone_training_external_site')}
+                                                            title="専用ウインドウで開く"
+                                                            className="shrink-0 text-indigo-600 hover:text-indigo-800 px-1 py-1 transition">
+                                                            <i className="fa-solid fa-up-right-from-square text-xs"></i>
                                                         </button>
                                                         <button
                                                             type="button"
