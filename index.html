@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>研修ポータル(1.72.6)</title>
+    <title>研修ポータル(1.72.7)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -68,7 +68,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const APP_VERSION = "v1.72.6";
+        const APP_VERSION = "v1.72.7";
 
         // ブラウザ名を判定する（EdgeはChromeのUAも含むため先に判定）
         const getBrowserName = () => {
@@ -3610,13 +3610,12 @@ ${cards.map(c => `- ID: "${c.id}", 意見: "${c.text}", 投稿者: "${c.author |
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
-                                <a
-                                    href={sharedLink.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                <button
+                                    type="button"
+                                    onClick={() => openDedicatedWindow(sharedLink.url, 'kintone_training_shared_link')}
                                     className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow transition active:scale-95 flex items-center gap-1.5">
-                                    <i className="fa-solid fa-up-right-from-square text-[10px]"></i> 開く
-                                </a>
+                                    <i className="fa-solid fa-up-right-from-square text-[10px]"></i> 別画面で開く
+                                </button>
                                 {appRole === 'board' && (
                                     <button
                                         onClick={handleClearSharedLink}
